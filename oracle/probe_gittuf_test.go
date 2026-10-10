@@ -31,6 +31,9 @@ func verdict(t *testing.T, label string, run func() (error, error)) bool {
 	if err != nil {
 		t.Fatalf("%s: harness: %v", label, err)
 	}
+	if verr != nil && !isPolicyDenial(verr) {
+		t.Fatalf("%s: unexpected gittuf error (not a policy denial): %v", label, verr)
+	}
 	t.Logf("%-70s gittuf=%s", label, yn(verr == nil))
 	return verr == nil
 }

@@ -171,6 +171,24 @@ func (w *World) InitRuleFile(signer *Key, name string) error {
 	return w.Repo.InitializeTargets(w.ctx, s, name, false)
 }
 
+// AddGlobalThreshold adds a gittuf global threshold rule (root metadata).
+func (w *World) AddGlobalThreshold(name string, patterns []string, threshold int) error {
+	s, err := gittuf.LoadSigner(w.Repo, w.Root.Private)
+	if err != nil {
+		return err
+	}
+	return w.Repo.AddGlobalRuleThreshold(w.ctx, s, name, patterns, threshold, false)
+}
+
+// AddGlobalBlockForcePushes adds a gittuf block-force-pushes global rule.
+func (w *World) AddGlobalBlockForcePushes(name string, patterns []string) error {
+	s, err := gittuf.LoadSigner(w.Repo, w.Root.Private)
+	if err != nil {
+		return err
+	}
+	return w.Repo.AddGlobalRuleBlockForcePushes(w.ctx, s, name, patterns, false)
+}
+
 // SignRuleFile adds signer's signature to a rule file's metadata.
 func (w *World) SignRuleFile(signer *Key, name string) error {
 	s, err := gittuf.LoadSigner(w.Repo, signer.Private)
@@ -214,11 +232,23 @@ func (w *World) Push(ref string, pusher *Key, attestors []*Key) (error, error) {
 // PushSigned is Push where the new commit itself is SSH-signed by commitSigner
 // (if non-nil).
 func (w *World) PushSigned(ref string, pusher *Key, attestors []*Key, commitSigner *Key) (error, error) {
+	return w.push(ref, "", pusher, attestors, commitSigner)
+}
+
+// PushFrom is Push with the new commit based on base instead of ref's tip
+// (base = an older commit makes a non-fast-forward update).
+func (w *World) PushFrom(ref, base string, pusher *Key, attestors []*Key) (error, error) {
+	return w.push(ref, base, pusher, attestors, nil)
+}
+
+func (w *World) push(ref, base string, pusher *Key, attestors []*Key, commitSigner *Key) (error, error) {
 	w.n++
 	feature := fmt.Sprintf("refs/heads/oracle-feature-%d", w.n)
-	base := ref
-	if _, err := git(w.Dir, "rev-parse", "--verify", "-q", ref); err != nil {
-		base = "refs/heads/main"
+	if base == "" {
+		base = ref
+		if _, err := git(w.Dir, "rev-parse", "--verify", "-q", ref); err != nil {
+			base = "refs/heads/main"
+		}
 	}
 	if _, err := git(w.Dir, "update-ref", feature, base); err != nil {
 		return nil, err
