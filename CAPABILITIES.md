@@ -1,59 +1,101 @@
 # Capability matrix
 
-Status: this is a partial draft from Step 2. It covers only the two rows that
-Step 2's findings settled: roles (nested thresholds) and pattern syntax. The
-full matrix, with one passing Cedar-path test per row, is Step 3.
+One row per capability, one test per row. gittuf facts are checked against
+gittuf `0b0278ec` (see FINDINGS.md), either by running gittuf in the oracle
+(`oracle/`) or by reading its source; the "gittuf today" cell says which.
 
-Columns:
-- **gittuf today**: verified against gittuf `0b0278ec`, in the source and with the oracle in `oracle/`.
-- **Cedar natively**: expressible in policies with no host help.
-- **Needs Phase A**: the host has to compute part of the decision.
+**Evidence labels** (for the Cedar approach):
+- **oracle-verified**: compared against real gittuf in `oracle/`.
+- **Go-tested**: a passing cedar-go test; no gittuf comparison.
+- **design-only**: argued, not run.
+- **not possible**: cannot be expressed.
 
-| Scenario | gittuf today | Cedar natively | Needs Phase A | Test |
-|---|---|---|---|---|
-| Nested thresholds ("roles": k-of-[principals, @role]) | **No compact form.** Delegated rule files mean something else (an OR across levels, Finding 7). **But expressible by expansion**: one rule per minimal approver set, threshold = set size, verified on gittuf (`TestRolesAsExpandedGittufRules`, 0/64 disagreements) | **Yes**, by the same expansion (strict mode); cost grows with C(n,k) | No | `go/gcedar` `TestDifferential`, `TestExpansionSizes`; `oracle` `TestRolesAsExpandedGittufRules` |
-| Ref patterns with `*` | Yes | Yes (`like`, `*` matches `/`) | No | `TestStarPatternsAgreeWithFnmatch` |
-| Ref patterns with positive classes `[ab]` | Yes | Yes, as an OR of `like` patterns (capped at 64) | Only above the cap | `TestBracketRewriteMatchesFnmatch` |
-| Ref patterns with `?`, `[!..]` | Yes | **No** | **Yes**: the host passes `context.matchedPatterns` | `TestLikeCannotExpressQuestionMark`, `TestProbePatterns` |
+**The GitHub column is from GitHub's documentation and was not tested here.**
+It covers branch protection, rulesets and CODEOWNERS as I understand them.
+Treat it as a pointer, not evidence.
+
+**Hand-written Cedar.** "Compiler" means the policies come from `gcedar`
+(`Compile` / `CompileMode`). "Hand-written Cedar" means the JSON compiler
+does not emit this construct yet: the test writes the Cedar directly, and it is
+validated against a schema (`capSchema` in `go/gcedar/capabilities_test.go`)
+with cedar-go's experimental validator before it is evaluated.
+
+| # | Capability | gittuf today | GitHub metadata (docs, untested) | Cedar approach | Phase A fact the host must supply | Evidence | Test |
+|---|---|---|---|---|---|---|---|
+| 1 | **Nested roles** (k-of-[principals, @role]) | **Partly: no compact notation, but the meaning is expressible.** One plain rule per minimal approver set, threshold = set size. 0/64 disagreements on gittuf (oracle). gittuf's delegated rule files mean something else (an OR across levels) | No (teams and CODEOWNERS; no nested thresholds) | Compiler expands roles into one `permit` per minimal approver set (`containsAll`); each signer counts toward one member only | Verified signer set | oracle-verified | `TestCapNestedRoles`; `oracle/TestRolesAsExpandedGittufRules` |
+| 2 | **Glob patterns** on refs | **Yes**: fnmatch, `*` crosses `/`, plus `?`, `[..]`, `[!..]` (oracle) | Yes (fnmatch-style branch and tag patterns) | `*` maps to `like`; positive classes `[ab]` to an OR of `like` patterns (≤ 64); `?` and `[!..]` are **not possible** in `like` | For `?` and `[!..]` only: `context.matchedPatterns` (which patterns match the ref, computed with gittuf's fnmatch) | oracle-verified | `TestCapGlobPatterns`; `oracle/TestProbePatterns`; `TestLikeCannotExpressQuestionMark` |
+| 3 | **k-of-n thresholds** | **Yes** (oracle) | Partly: "N approvals required" counts anyone with write access, not k of a named set | One `permit` per k-subset (C(n,k) permits) | Verified signer set; in gittuf mode, distinct key IDs | oracle-verified | `TestCapThreshold`; `oracle/TestHandwritten2of3`, `oracle/TestRandomAgainstGittuf` |
+| 4 | **Deny/forbid rules that override permits** | **Partly: two fixed kinds only.** A global `threshold` rule overrides a passing rule and also covers unprotected refs; `block-force-pushes` (oracle) | Partly (fixed restrictions: block force pushes, restrict deletions, restrict updates) | `forbid … unless {…}` (forbid wins over any permit). Test: a gittuf-style global floor written as a forbid over the compiled gittuf-mode policies. **Hand-written Cedar** | None beyond the signer set. A floor over all N principals is C(N,k) clauses, because Cedar has no set size | Go-tested (gittuf side oracle-verified) | `TestCapForbidOverridesPermit`; `oracle/TestOracleGlobalRules` |
+| 5 | **Self-approval ban** (author's approval cannot count) | **No.** `internal/policy` has no notion of the commit author (source) | Yes (a PR author cannot approve their own PR; "approval of most recent push" exists) | Compiler `forbid … when { context.approvals.contains(context.author) }`; Cedar reports the forbid | `context.author` mapped to a principal, plus the fresh approval set (forge data, trusted) | Go-tested | `TestForgeSelfApprovalForbidden` |
+| 6 | **Rule exceptions** ("all of refs/heads/* except main") | **No.** Rules are alternatives, so a broad rule always also applies to main (oracle, FINDINGS Finding 1). Only character-level `[!..]`, and `terminating` cannot be set (source) | Yes (ruleset include/exclude patterns, bypass lists) | `like "refs/heads/*" && !(resource.name == "refs/heads/main")`, or a `forbid`. **Hand-written Cedar**; strict mode's first-match also gives "specific rule first" | None | Go-tested | `TestCapRuleExceptions` |
+| 7 | **Field-level signing** (field X needs k-of keys Y; Justin's case) | **Partly**: `file:` rules protect file paths (commit signatures over changed paths), not fields inside a document (source) | No | One `Field` entity per field with a `signers` attribute; one `permit` per field per minimal key set; "all fields accepted and none missing" is a host loop | Per-field verified signer sets over `Canonical(name, value)`; the list of fields present | Go-tested | `TestFieldsAccept` (+ 12 more in `fields_test.go`) |
+| 8 | **Time windows** (freeze periods, business hours) | **No.** No clock in verification (source) | No (not natively) | cedar-go `datetime`/`duration`: `context.now >= datetime(..)`, `context.now.toTime() < duration("17h")`. **Hand-written Cedar** | `context.now` from a **trusted** time source: not the commit's or RSL entry's own timestamp, which the signer controls. Which time to use when re-verifying history is open | Go-tested | `TestCapTimeWindow` |
+| 9 | **Attribute-based conditions** on ref and context (immutable tags, no force push, CI passed) | **Partly**: `block-force-pushes` is the only one (oracle). Tags also need a signed tag object (source) | Partly (required status checks, block force pushes, tag rules) | Entity attribute `resource.kind`, context `refExists`, `fastForward`, `ciPassed`, plus `forbid`s. **Hand-written Cedar** | Each attribute: ref kind, whether the ref existed, fast-forward (Git ancestry), CI status (forge, trusted) | Go-tested | `TestCapAttributeConditions` |
+| 10 | **Explainable decisions** (which policy fired) | **Partly.** The CLI error is generic ("verifying Git namespace policies failed, gittuf policy verification failed", seen in the oracle); the satisfied rule is only in debug logs | Partly (the UI and API list the blocking rules) | Cedar diagnostics list every satisfied `permit` (rule + approver set) or the deciding `forbid`; a default deny lists nothing. Caveat: cedar-go assigns positional IDs (`policyN`) and ignores `@id`, so a side table (`Compiled.Meta`) maps them back | None | Go-tested | `TestCapExplainableDecisions` |
+| 11 | **Schema validation of policies** | **No policy language to type-check**; rules are data. Further metadata validation not investigated | Partly (the API validates ruleset JSON) | cedar-go `x/exp/schema/validate` (strict) rejects unknown attributes and type errors; `NewEvaluator` runs it on all compiler output | None | Go-tested | `TestCapSchemaValidation` |
+| 12 | **Rule-order independence** | **Yes**, except `terminating`, which cannot be set: matching rules are alternatives, and reversing their order never changed a verdict (oracle, Finding 1) | Yes (all applicable rulesets apply) | Cedar policy sets are unordered: 20 shuffles of the compiled policies never changed a verdict, in gittuf mode and in strict mode (strict mode writes its order into each permit as negated earlier patterns) | None | Go-tested (gittuf side oracle-verified) | `TestCapOrderIndependence`; `oracle/TestProbeRuleMatching` |
+
+## How much of each row is Phase A
+
+Rows 1–3, 6, 10, 11 and 12 need nothing beyond the verified signer set:
+everything else is in Cedar and visible to analysis. The other rows rely on
+host-computed facts that Cedar takes on trust:
+
+| Row | What Cedar decides | What the host decides (Cedar cannot check it) |
+|---|---|---|
+| 2 (`?`, `[!..]` only) | the threshold | whether the pattern matches the ref |
+| 4 | the floor and override logic | nothing extra (the signer set) |
+| 5 | "author's approval must not count" | who the author is, which approvals are fresh (stale, dismissed and re-approved logic is all host-side, `FreshApprovals`) |
+| 7 | the per-field threshold | which keys signed which field; the loop "all fields OK, none missing" |
+| 8 | the window arithmetic | what time it is |
+| 9 | the combination logic | ref kind, fast-forward, CI status |
+
+## Related source checks (not rows)
+
+* **Dismissed approvals in gittuf:** `DismissedApprovers` is recorded in the
+  GitHub approval attestation, but **never read during verification**:
+  `internal/policy/verify.go` only reads `GetApprovers()`. Dismissal works
+  because `DismissGitHubPullRequestApprover` rewrites the attestation without
+  the dismissed approver (`experimental/gittuf/attestations.go`, around line 513).
+  Source-verified, not oracle-tested (it needs a GitHub app).
+* **Stale approvals in gittuf:** approvals and reference authorizations are
+  indexed by (ref, from-commit, to-**tree**), so a new tree needs new approvals.
+  Source-verified. The Cedar path's equivalent is `FreshApprovals` in Phase A
+  (`TestForgeStaleApprovalAfterNewCommit`).
+
+## Not covered in this pass
+
+From the original Step 3 list: ref-deletion blocking, admin bypass, and a
+scenario gittuf cannot do at all. These would be variations of rows 4, 6 and 9
+(a forbid on `context.isDeletion`; a permit for an admin role with a forbid
+carve-out; time windows, row 8, are already something gittuf cannot do).
+They are **design-only** and untested, so they are not rows.
 
 ## Roles vs gittuf delegated rule files: where the meaning differs
 
+(Unchanged from Step 2; this is the detail behind row 1.)
+
 Our role `@team = 2-of-[carol, dave]` used inside `2-of-[alice, @team]` means:
-alice signs **and** two of carol and dave sign. Every satisfying set is a
-combination across levels.
+alice signs **and** two of carol and dave sign.
 
 A gittuf rule `team` (2-of-{alice, bob}) that delegates to a rule file `team`
-containing `team-main` (2-of-{carol, dave}) means something different (Finding 7):
+containing `team-main` (2-of-{carol, dave}) means something different (oracle,
+`TestProbeDelegatedRuleFile`):
 
 1. **The levels are alternatives.** alice+bob is enough, and carol+dave is
    enough. Signatures never combine across levels: alice+carol is denied.
-2. **The delegator's threshold protects the rule file, not the push.** alice
-   and bob must sign the `team` rule file's metadata, but no push needs them.
-3. **The delegated file can be weaker than its delegator.** A `*` 1-of-{carol}
-   rule in the team file lets carol push to `main` alone.
-4. **The delegated file is confined to its delegator's namespace.** Its rules
-   are only consulted when the delegating rule's pattern matches the ref.
-5. **Order and `terminating` decide which files are consulted.** No such
-   concept exists for roles. `terminating` cannot currently be set by users.
+2. **The delegator's threshold protects the rule file, not the push.**
+3. **The delegated file can be weaker than its delegator** (a `*` 1-of-{carol}
+   rule in it lets carol push to main alone).
+4. **The delegated file is confined to its delegator's namespace.**
+5. **Order and `terminating` decide which files are consulted** (and
+   `terminating` cannot currently be set).
 
 Mapping in each direction:
-- **gittuf to Cedar: yes (argued, not yet tested against the oracle).** A delegation is expressible with roles plus a
-  pattern conjunction: `1-of-[@delegator, @delegated-rule]` for each delegated
-  rule, with the delegated rule's pattern intersected with the delegator's
-  pattern. Point 2, the metadata signatures, is Phase A: the host checks the
-  rule file's signatures before compiling it, and Cedar is never asked.
-- **Cedar to gittuf: yes for the meaning, not for the notation.** Because
-  gittuf rules are alternatives, the compiler's own expansion can be written
-  as plain gittuf rules: one rule per minimal approver set, with threshold
-  equal to the set's size. `TestRolesAsExpandedGittufRules` runs two nested
-  documents ("lead AND 2-of-team" and "2-of-[alice, 2-of-{bob,carol},
-  1-of-{dave,erin}]") on real gittuf and on strict-mode Cedar, across all 32
-  signer subsets each: 0 disagreements. It costs gittuf the same C(n,k)
-  blow-up, as rule-file entries instead of Cedar permits.
-
-**So, correcting the framing of this row:** roles are *not* more expressive
-in Cedar than in gittuf. Both reach nested thresholds only by enumerating
-minimal approver sets. What the Cedar path adds is (1) a compact source
-notation that the compiler expands, and (2) the expanded policies sit where
-Cedar's analysis can reason about them (Step 4). The real difference from gittuf's own
-*delegation* feature is semantic (points 1–5 above), not expressive power.
+- **gittuf to Cedar:** a delegation can be written as `1-of-[@delegator,
+  @delegated-rule]`, with the delegated rule's pattern intersected with the
+  delegator's. Point 2 is Phase A: the host checks the rule file's signatures
+  before compiling it. **design-only** (not run against the oracle).
+- **Cedar to gittuf:** yes for the meaning, by expansion: one plain gittuf rule
+  per minimal approver set (oracle, 0/64 disagreements). So roles are notation
+  plus analyzability on the Cedar side, not extra expressive power.
