@@ -305,11 +305,13 @@ type PolicyMeta struct {
 
 // Compiled is the output of Compile.
 type Compiled struct {
+	Mode     Mode
 	Schema   string
 	Policies string
 	Meta     []PolicyMeta
 	NPermit  int
 	NForbid  int
+	Warnings []string // e.g. rules gittuf accepts that can never be met
 }
 
 // Compile translates a delegation document into Cedar policies.
@@ -326,7 +328,7 @@ func Compile(doc *Doc) (*Compiled, error) {
 		seen[r.Name] = true
 	}
 
-	c := &Compiled{Schema: Schema}
+	c := &Compiled{Schema: Schema, Mode: ModeStrict}
 	var b strings.Builder
 	emit := func(kind, body string, m PolicyMeta) {
 		fmt.Fprintf(&b, "%s(principal, action == Action::\"write\", resource) when { %s };\n", kind, body)

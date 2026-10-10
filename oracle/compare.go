@@ -3,6 +3,7 @@ package oracle
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/pratham/gcedar/gcedar"
 )
@@ -31,44 +32,145 @@ func (s Scenario) Signers(doc *gcedar.Doc) []string {
 	return out
 }
 
+// keyName is the SSH key backing a doc principal: the principal's own name,
+// or "<name>" when the doc gives "key:<name>" (used to make principals share
+// a key).
+func keyName(doc *gcedar.Doc, principal string) string {
+	if v := doc.Principals[principal]; strings.HasPrefix(v, "key:") {
+		return strings.TrimPrefix(v, "key:")
+	}
+	return principal
+}
+
 // Materialize writes a flat (role-free) delegation doc into w's "targets" rule
-// file. Principals are SSH keys named after the doc's principal names; rule
-// patterns get gittuf's "git:" scheme prefix. Rule members are passed to gittuf
-// verbatim, duplicates included.
+// file. A principal with a key of its own becomes a plain SSH-key principal
+// (ID = key ID); principals that share a key become tufv02 persons (ID = the
+// principal name) via the gittuf CLI. Rule patterns get gittuf's "git:"
+// prefix. Rule members are passed to gittuf verbatim, duplicates included.
 func Materialize(w *World, doc *gcedar.Doc) error {
-	var keys []*Key
+	ids, err := gittufIDs(doc)
+	if err != nil {
+		return err
+	}
+	byKey := map[string][]string{}
 	names := make([]string, 0, len(doc.Principals))
 	for n := range doc.Principals {
 		names = append(names, n)
 	}
 	sort.Strings(names)
 	for _, n := range names {
-		k, err := GetKey(n)
+		byKey[keyName(doc, n)] = append(byKey[keyName(doc, n)], n)
+	}
+	for _, n := range names {
+		k, err := GetKey(keyName(doc, n))
 		if err != nil {
 			return err
 		}
-		keys = append(keys, k)
-	}
-	if err := w.AddKeys("targets", keys...); err != nil {
-		return err
+		if len(byKey[keyName(doc, n)]) > 1 {
+			if err := w.AddPerson("targets", n, k); err != nil {
+				return err
+			}
+		} else if err := w.AddKeys("targets", k); err != nil {
+			return err
+		}
 	}
 	for _, r := range doc.Rules {
 		if r.Source != "" && r.Source != "signers" {
 			return fmt.Errorf("rule %s: source %q not materializable", r.Name, r.Source)
 		}
-		ids := make([]string, len(r.Members))
+		members := make([]string, len(r.Members))
 		for i, m := range r.Members {
-			k, err := GetKey(m)
-			if err != nil {
-				return err
-			}
-			ids[i] = k.ID
+			members[i] = ids[m]
 		}
-		if err := w.AddRule("targets", r.Name, ids, []string{"git:" + r.Pattern}, r.Threshold); err != nil {
+		if err := w.AddRule("targets", r.Name, members, []string{"git:" + r.Pattern}, r.Threshold); err != nil {
 			return fmt.Errorf("add rule %s: %w", r.Name, err)
 		}
 	}
 	return w.Apply()
+}
+
+// gittufIDs maps doc principal names to the principal IDs gittuf will use.
+func gittufIDs(doc *gcedar.Doc) (map[string]string, error) {
+	count := map[string]int{}
+	for n := range doc.Principals {
+		count[keyName(doc, n)]++
+	}
+	out := map[string]string{}
+	for n := range doc.Principals {
+		if count[keyName(doc, n)] > 1 {
+			out[n] = n // person
+			continue
+		}
+		k, err := GetKey(keyName(doc, n))
+		if err != nil {
+			return nil, err
+		}
+		out[n] = k.ID
+	}
+	return out, nil
+}
+
+// ModesUnderTest are the compile modes compared against gittuf.
+var ModesUnderTest = []gcedar.Mode{gcedar.ModeStrict, gcedar.ModeGittuf}
+
+// forMode rewrites a test doc for a compile mode. Gittuf mode identifies
+// principals by the key ID of their (possibly shared) SSH key.
+func forMode(doc *gcedar.Doc, mode gcedar.Mode) (*gcedar.Doc, error) {
+	d := *doc
+	d.Principals = map[string]string{}
+	for n := range doc.Principals {
+		d.Principals[n] = ""
+		if mode == gcedar.ModeGittuf {
+			k, err := GetKey(keyName(doc, n))
+			if err != nil {
+				return nil, err
+			}
+			d.Principals[n] = k.ID
+		}
+	}
+	return &d, nil
+}
+
+// CedarVerdictMode runs a scenario through our compiler + cedar-go in a mode.
+// Phase A is simulated faithfully for the mode: strict mode reports the
+// principal names whose key signed; gittuf mode reports distinct key IDs and
+// the fnmatch-only patterns that match the ref.
+func CedarVerdictMode(doc0 *gcedar.Doc, mode gcedar.Mode, ref string, s Scenario) (bool, error) {
+	doc, err := forMode(doc0, mode)
+	if err != nil {
+		return false, err
+	}
+	c, err := gcedar.CompileMode(doc, mode)
+	if err != nil {
+		return false, err
+	}
+	ev, err := gcedar.NewEvaluator(doc, c)
+	if err != nil {
+		return false, err
+	}
+	signed := map[string]bool{} // key names that produced a signature
+	for _, n := range append([]string{s.Pusher}, s.Attestors...) {
+		if n != "" {
+			signed[n] = true
+		}
+	}
+	var names []string // principals whose key signed
+	for n := range doc0.Principals {
+		if signed[keyName(doc0, n)] {
+			names = append(names, n)
+		}
+	}
+	sort.Strings(names)
+	f := gcedar.Facts{Ref: ref, Pusher: "pusher", Author: "pusher", Signers: names}
+	if mode == gcedar.ModeGittuf {
+		f.Signers = gcedar.KeyIDs(doc, names)
+		f.MatchedPatterns = gcedar.MatchedPatterns(doc, ref)
+	}
+	d := ev.Decide(f)
+	if len(d.Errors) > 0 {
+		return false, fmt.Errorf("cedar errors: %v", d.Errors)
+	}
+	return d.Allowed, nil
 }
 
 // PushScenario runs a scenario through gittuf (nil verdict error = allow).

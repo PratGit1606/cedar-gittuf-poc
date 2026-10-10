@@ -17,8 +17,11 @@ type Facts struct {
 	Ref       string
 	Pusher    string
 	Author    string
-	Signers   []string
+	Signers   []string // strict: principal names; gittuf mode: key IDs
 	Approvals []string
+	// MatchedPatterns (gittuf mode only) lists the rule patterns Cedar cannot
+	// match itself that match Ref; see MatchedPatterns.
+	MatchedPatterns []string
 }
 
 // Decision is a Phase B verdict plus the compiled policies that determined it.
@@ -42,20 +45,26 @@ func NewEvaluator(doc *Doc, c *Compiled) (*Evaluator, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse compiled policies: %w", err)
 	}
-	if err := ValidatePolicies(ps); err != nil {
+	if err := ValidatePoliciesWith(c.Schema, ps); err != nil {
 		return nil, err
 	}
 	users := make([]string, 0, len(doc.Principals))
-	for u := range doc.Principals {
+	for u, k := range doc.Principals {
+		if c.Mode == ModeGittuf {
+			u = k
+		}
 		users = append(users, u)
 	}
 	return &Evaluator{Compiled: c, ps: ps, users: users}, nil
 }
 
 // ValidatePolicies type-checks a policy set against Schema.
-func ValidatePolicies(ps *cedar.PolicySet) error {
+func ValidatePolicies(ps *cedar.PolicySet) error { return ValidatePoliciesWith(Schema, ps) }
+
+// ValidatePoliciesWith type-checks a policy set against a Cedar schema.
+func ValidatePoliciesWith(schemaText string, ps *cedar.PolicySet) error {
 	var s schema.Schema
-	if err := s.UnmarshalCedar([]byte(Schema)); err != nil {
+	if err := s.UnmarshalCedar([]byte(schemaText)); err != nil {
 		return fmt.Errorf("schema: %w", err)
 	}
 	rs, err := s.Resolve()
@@ -95,7 +104,27 @@ func (e *Evaluator) Entities(ref string) cedar.EntityMap {
 	return m
 }
 
-// Request builds the Cedar request for a set of facts.
+// Request builds the Cedar request for a set of facts in the given mode.
+func RequestMode(mode Mode, f Facts) cedar.Request {
+	if mode != ModeGittuf {
+		return Request(f)
+	}
+	pats := make([]cedar.Value, len(f.MatchedPatterns))
+	for i, p := range f.MatchedPatterns {
+		pats[i] = cedar.String(p)
+	}
+	return cedar.Request{
+		Principal: cedar.NewEntityUID("User", cedar.String(f.Pusher)),
+		Action:    cedar.NewEntityUID("Action", "write"),
+		Resource:  cedar.NewEntityUID("Ref", cedar.String(f.Ref)),
+		Context: cedar.NewRecord(cedar.RecordMap{
+			"signers":         userSet(f.Signers),
+			"matchedPatterns": cedar.NewSet(pats...),
+		}),
+	}
+}
+
+// Request builds the strict-mode Cedar request for a set of facts.
 func Request(f Facts) cedar.Request {
 	return cedar.Request{
 		Principal: cedar.NewEntityUID("User", cedar.String(f.Pusher)),
@@ -116,7 +145,7 @@ func (e *Evaluator) Decide(f Facts) Decision {
 
 // DecideWith is Decide with a caller-supplied entity store (for batching).
 func (e *Evaluator) DecideWith(ents cedar.EntityMap, f Facts) Decision {
-	dec, diag := cedar.Authorize(e.ps, ents, Request(f))
+	dec, diag := cedar.Authorize(e.ps, ents, RequestMode(e.Compiled.Mode, f))
 	d := Decision{Allowed: dec == cedar.Allow}
 	for _, r := range diag.Reasons {
 		d.Reasons = append(d.Reasons, e.meta(r.PolicyID))

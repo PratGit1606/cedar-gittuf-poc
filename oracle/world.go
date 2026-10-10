@@ -133,9 +133,14 @@ func NewWorld(dir string) (*World, error) {
 	return w, nil
 }
 
-// AddKeys adds SSH keys as principals to a rule file.
+// AddKeys adds SSH keys as principals to a rule file (signed by the root/policy key).
 func (w *World) AddKeys(ruleFile string, keys ...*Key) error {
-	s, err := gittuf.LoadSigner(w.Repo, w.Root.Private)
+	return w.AddKeysAs(w.Root, ruleFile, keys...)
+}
+
+// AddKeysAs is AddKeys with the rule file signed by signer.
+func (w *World) AddKeysAs(signer *Key, ruleFile string, keys ...*Key) error {
+	s, err := gittuf.LoadSigner(w.Repo, signer.Private)
 	if err != nil {
 		return err
 	}
@@ -153,7 +158,31 @@ func (w *World) AddKeys(ruleFile string, keys ...*Key) error {
 
 // AddRule appends a rule (gittuf: delegation) to a rule file.
 func (w *World) AddRule(ruleFile, name string, principalIDs, patterns []string, threshold int) error {
-	s, err := gittuf.LoadSigner(w.Repo, w.Root.Private)
+	return w.AddRuleAs(w.Root, ruleFile, name, principalIDs, patterns, threshold)
+}
+
+// InitRuleFile creates a delegated rule file. Its name must equal the name of
+// the delegating rule, and signer must satisfy that rule's threshold.
+func (w *World) InitRuleFile(signer *Key, name string) error {
+	s, err := gittuf.LoadSigner(w.Repo, signer.Private)
+	if err != nil {
+		return err
+	}
+	return w.Repo.InitializeTargets(w.ctx, s, name, false)
+}
+
+// SignRuleFile adds signer's signature to a rule file's metadata.
+func (w *World) SignRuleFile(signer *Key, name string) error {
+	s, err := gittuf.LoadSigner(w.Repo, signer.Private)
+	if err != nil {
+		return err
+	}
+	return w.Repo.SignTargets(w.ctx, s, name, false)
+}
+
+// AddRuleAs is AddRule with the rule file signed by signer.
+func (w *World) AddRuleAs(signer *Key, ruleFile, name string, principalIDs, patterns []string, threshold int) error {
+	s, err := gittuf.LoadSigner(w.Repo, signer.Private)
 	if err != nil {
 		return err
 	}
@@ -179,6 +208,12 @@ func (w *World) Apply() error {
 //
 // It returns gittuf's verdict on the latest entry for ref (nil = allowed).
 func (w *World) Push(ref string, pusher *Key, attestors []*Key) (error, error) {
+	return w.PushSigned(ref, pusher, attestors, nil)
+}
+
+// PushSigned is Push where the new commit itself is SSH-signed by commitSigner
+// (if non-nil).
+func (w *World) PushSigned(ref string, pusher *Key, attestors []*Key, commitSigner *Key) (error, error) {
 	w.n++
 	feature := fmt.Sprintf("refs/heads/oracle-feature-%d", w.n)
 	base := ref
@@ -191,7 +226,11 @@ func (w *World) Push(ref string, pusher *Key, attestors []*Key) (error, error) {
 	if _, err := git(w.Dir, "symbolic-ref", "HEAD", feature); err != nil {
 		return nil, err
 	}
-	if _, err := git(w.Dir, "commit", "-q", "--allow-empty", "-m", fmt.Sprintf("change %d", w.n)); err != nil {
+	commit := []string{"commit", "-q", "--allow-empty", "-m", fmt.Sprintf("change %d", w.n)}
+	if commitSigner != nil {
+		commit = append([]string{"-c", "gpg.format=ssh", "-c", "user.signingkey=" + commitSigner.Private}, append(commit, "-S")...)
+	}
+	if _, err := git(w.Dir, commit...); err != nil {
 		return nil, err
 	}
 	if _, err := git(w.Dir, "symbolic-ref", "HEAD", "refs/heads/main"); err != nil {
