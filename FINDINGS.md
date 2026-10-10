@@ -370,3 +370,38 @@ The overlapping-roles row changes strict-mode meaning compared with
 `compile.py`. `TestPythonByteCompat` therefore skips inputs with a duplicate
 member or an overlap, and says why in a comment. On its 403 inputs: 114
 identical, 62 rejected by both, 0 differ, 227 skipped.
+
+## Notes recorded after the Python-to-Go port
+
+**(a) The count-once rule changes strict-mode meaning compared with the old `compile.py`.**
+In a threshold, each chosen member must now be met by its own signers. One
+signer can no longer satisfy two members through overlapping roles: 2-of-[@r1, @r2]
+with alice in both roles, or 2-of-[alice, @r] with alice in @r, now need two
+different signers. `compile.py` and `reference.py` let alice satisfy both.
+With the rule removed from `ExpandThreshold`, the differential test
+(Cedar vs the search-based Go reference, 171,644 verdicts) reports **2,752
+mismatches**, so the rule is exercised. `TestPythonByteCompat` skips the
+affected inputs on purpose (227 of 403).
+
+**(b) The oracle pushes that are no longer compared.** In the 300-document
+oracle run, **832 of 2,400 gittuf-mode pushes are not compared**. All of them
+are on documents that list a member twice: gittuf accepts these (and the rule
+can never be met), while the Go compiler now rejects them with
+`DuplicateMemberError`. Documents with **shared keys are still compared**:
+gittuf mode does not reject them, it merges principals sharing a key into
+one key-ID identity, as gittuf does. The remaining 1,568 gittuf-mode pushes
+show 0 disagreements. So the "0 disagreements" claim covers documents without
+duplicate members; for documents with them, we deliberately differ.
+
+**(c) Field-signature encoding limits.** `Canonical` reproduces Python's
+`json.dumps(..., sort_keys=True, separators=(",",":"))` byte for byte for
+strings (including non-ASCII, control characters and DEL), booleans, null,
+integers within int64, arrays, objects, and floats in their shortest
+representation (`TestCanonicalMatchesPython`, 13 values). Two known
+differences remain: integers that need more than 64 bits (Go goes through
+float64, Python keeps the exact integer), and JSON number text that is not in
+shortest form, such as `1.50` (Python prints `1.5`, and so does Go after
+parsing, but only if the value reaches `Canonical` as a parsed number rather
+than as the original text). **Once the Python code is removed, the Go
+encoding is the specification**, and these cases are defined by `Canonical`,
+not by Python.
