@@ -46,7 +46,9 @@ still byte-identical to `compile.py`.
 | Several rules match a ref | the first matching rule decides | any matching rule may satisfy |
 | No rule matches | `default` (allow or deny) | always allowed (unprotected); an explicit `default: deny` is rejected |
 | Principal identity in Cedar | name | **key ID**; principals that share a key collapse into one |
-| Duplicate members | counted once per listing | counted once; a rule with fewer distinct keys than its threshold is kept but gets no permits (it can never be met) |
+| Duplicate members | **rejected** (`DuplicateMemberError`), since Go change 1 below | **rejected**, since Go change 1 below; before that, counted once like gittuf |
+| One signer reaching two members of one threshold (overlapping roles) | counts toward **one** member only, since Go change 1 below | n/a (no roles) |
+| Two principals sharing a key | rejected by the Phase A verifier | collapse into one key-ID identity; a rule left with fewer distinct keys than its threshold gets no permits, as in gittuf |
 | Patterns | `*` only (anything else is rejected) | `*` uses `like`; positive classes `[ab]` and `[0-9]` become a bounded OR of `like`; `?`, `[!..]` and escapes are matched in **Phase A** and passed as `context.matchedPatterns` |
 | Roles, `approvals` source, forbid-self-approval | supported | rejected (no gittuf equivalent; see CAPABILITIES.md) |
 
@@ -224,11 +226,15 @@ standalone CLI script `repro/gittuf-duplicate-members-lockout.sh`.
   ```
   Script usage: `GITTUF=/path/to/gittuf repro/gittuf-duplicate-members-lockout.sh`.
   It uses only the CLI, `git` and `ssh-keygen`.
-* **(a) Our model is wrong in strict mode:** it counts a duplicated member once
-  per listing, which quietly lowers the threshold. Strict mode is left as is
-  (as instructed). Gittuf mode counts distinct keys and reproduces gittuf,
-  lockout included, and the compiler reports the dead rule as a warning in
-  `Compiled.Warnings`.
+* **(a) Our model was wrong in strict mode:** it counted a duplicated member once
+  per listing, which quietly lowers the threshold.
+* **Resolution (Go change 1):** the Go compiler now **rejects** a member
+  listed twice, in both modes, with `DuplicateMemberError`. This is a
+  deliberate difference from both Python (which counts twice) and gittuf
+  (which accepts the rule and locks the namespace). The oracle reports such
+  documents as "not compared (rejected by design)": after this change, the
+  300-document run compared 1,568 gittuf-mode verdicts with 0 disagreements,
+  and 832 were not compared.
 
 ## Finding 5: principals sharing a key (bug in our Phase A)
 
@@ -346,3 +352,21 @@ above:
 * full-history verification (`VerifyRefFull`), policy changes partway through
   the history, RSL skip annotations and recovery;
 * policy metadata thresholds (root and targets signatures) and expiry.
+
+## Go change 1: each key counts once (after Step 2)
+
+Every path where one key could count twice toward a threshold, and how the Go
+code closes it:
+
+| Path | Before | Now | Test |
+|---|---|---|---|
+| Member listed twice in a rule or role (`["a","a"]`) | Python: counted twice | compile error `DuplicateMemberError` (strict and gittuf mode) | `TestDuplicateRuleMemberRejected`, `TestDuplicateRoleMemberRejected` |
+| One signer satisfying two members of one threshold via overlapping roles (2-of-[@r1,@r2], a in both; or 2-of-[a,@r], a in @r) | Python and Go: a alone met it | each chosen member must be met by **disjoint** signers | `TestOverlappingMembersCountOnce`; differential test vs an independent search-based reference (a mutant without the rule gives 2,752 mismatches) |
+| Same signer listed twice in Cedar context | already a set | unchanged (Cedar `Set`) | `TestRepeatedSignerInFactsCountsOnce` |
+| Two principal names bound to one public key (one signature filed under both names) | Python Phase A: counted twice (Finding 5) | strict: the Go Phase A verifier refuses the document (hex is normalised, so `AB..` = `ab..`); gittuf mode: key ID is the identity | `TestSharedKeyRejected` (verify_test.go), `TestGittufModeSharedKeyCountsOnce` |
+| Field spec listing a key twice; two field keys with the same public key | Python: counted twice | compile error; field verifier refuses the document | fields_test.go |
+
+The overlapping-roles row changes strict-mode meaning compared with
+`compile.py`. `TestPythonByteCompat` therefore skips inputs with a duplicate
+member or an overlap, and says why in a comment. On its 403 inputs: 114
+identical, 62 rejected by both, 0 differ, 227 skipped.

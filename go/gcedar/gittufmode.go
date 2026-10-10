@@ -23,9 +23,12 @@ const (
 	//   - every rule whose pattern matches is an alternative; any one met allows
 	//   - refs no rule matches are unprotected and allowed (no default deny)
 	//   - principals are identified by key ID, so a key counts at most once and
-	//     principals sharing a key collapse; duplicate members collapse
-	//   - a rule whose distinct keys are fewer than its threshold is accepted
-	//     but can never be met (gittuf stores such rules, see FINDINGS.md)
+	//     principals sharing a key collapse
+	//   - a member listed twice is rejected (deliberate deviation: gittuf
+	//     accepts it and the rule can never be met, FINDINGS.md Finding 4)
+	//   - a rule whose distinct keys are fewer than its threshold because two
+	//     listed principals share a key is accepted but can never be met, as
+	//     in gittuf; Compiled.Warnings reports it
 	//   - patterns are fnmatch globs; positive bracket classes are rewritten to a
 	//     bounded disjunction of `like` patterns; patterns with no exact `like`
 	//     form (?, negated classes, escapes) are matched by the host (Phase A)
@@ -156,6 +159,9 @@ func compileGittuf(doc *Doc) (*Compiled, error) {
 		}
 		// gittuf write-time checks (internal/tuf/v02/targets.go AddRule): every
 		// listed principal exists, threshold > 0, len(list) >= threshold.
+		if err := checkDuplicates(rule.Members); err != nil {
+			return nil, fmt.Errorf("rule %s: %w", rule.Name, err)
+		}
 		ids := make([]string, 0, len(rule.Members))
 		for _, m := range rule.Members {
 			if strings.HasPrefix(m, "@") {

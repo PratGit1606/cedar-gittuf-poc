@@ -2,6 +2,7 @@ package oracle
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -78,6 +79,7 @@ func TestRandomAgainstGittuf(t *testing.T) {
 	total := 0
 	mism := map[gcedar.Mode]int{}
 	compileErr := map[gcedar.Mode]int{}
+	dupRejected := map[gcedar.Mode]int{}
 	allows, sharedDocs, dupDocs, phaseADocs := 0, 0, 0, 0
 	examples := map[gcedar.Mode][]string{}
 	sem := make(chan struct{}, 4)
@@ -135,6 +137,13 @@ func TestRandomAgainstGittuf(t *testing.T) {
 				}
 				for _, m := range ModesUnderTest {
 					c, err := CedarVerdictMode(doc, m, p.ref, Scenario{Pusher: p.pusher, Attestors: p.att})
+					var dup *gcedar.DuplicateMemberError
+					if errors.As(err, &dup) {
+						// Deliberate: we reject a member listed twice (gittuf
+						// accepts it and the rule can never be met).
+						dupRejected[m]++
+						continue
+					}
 					if err != nil {
 						compileErr[m]++
 					}
@@ -154,7 +163,8 @@ func TestRandomAgainstGittuf(t *testing.T) {
 	t.Logf("%d docs (%d with a shared key, %d with a duplicated member, %d with a Phase-A-only pattern); %d pushes, gittuf allowed %d",
 		nDocs, sharedDocs, dupDocs, phaseADocs, total, allows)
 	for _, m := range ModesUnderTest {
-		t.Logf("mode %-6s: %d/%d verdicts disagree with gittuf (%d of them: document does not compile in this mode)", m, mism[m], total, compileErr[m])
+		t.Logf("mode %-6s: %d/%d verdicts disagree with gittuf (%d of them: document does not compile in this mode); %d not compared (duplicate member, rejected by design)",
+			m, mism[m], total-dupRejected[m], compileErr[m], dupRejected[m])
 		for _, e := range examples[m] {
 			t.Logf("   %s", e)
 		}

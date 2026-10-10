@@ -112,8 +112,19 @@ json.dump(out, sys.stdout)
 	if err := json.Unmarshal(outB, &pyOut); err != nil {
 		t.Fatal(err)
 	}
-	same, bothErr, diff := 0, 0, 0
+	same, bothErr, diff, skipped := 0, 0, 0, 0
 	for i, d := range docs {
+		// Expected, deliberate differences from compile.py; skip these inputs:
+		//  - a member listed twice: Go rejects it (DuplicateMemberError), Python
+		//    accepts it and counts the member twice.
+		//  - one principal reachable through two members of the same threshold
+		//    (e.g. 2-of-[a, @r] with a in @r): Go requires each member to be met
+		//    by its own signers, Python lets one signer count for both, so the
+		//    permit sets can differ.
+		if hasDuplicateOrOverlap(d) {
+			skipped++
+			continue
+		}
 		c, gerr := Compile(d)
 		p := pyOut[i]
 		switch {
@@ -137,7 +148,7 @@ json.dump(out, sys.stdout)
 			same++
 		}
 	}
-	t.Logf("python byte-compat: %d identical, %d both rejected, %d differ", same, bothErr, diff)
+	t.Logf("python byte-compat: %d identical, %d both rejected, %d differ, %d skipped (expected difference)", same, bothErr, diff, skipped)
 }
 
 func flatDoc(n, k int) *Doc {
@@ -218,4 +229,52 @@ func TestForbidOverridesAndReasons(t *testing.T) {
 	if d.Allowed || len(d.Reasons) != 1 || d.Reasons[0].Rule != "<self-approval>" {
 		t.Errorf("want deny by self-approval forbid, got %+v", d)
 	}
+}
+
+// hasDuplicateOrOverlap reports whether any threshold in d (rule or reachable
+// role) lists a member twice, or has two members that can reach the same
+// principal. Those are the inputs where Go deliberately differs from Python.
+func hasDuplicateOrOverlap(d *Doc) bool {
+	var reach func(m string, stack map[string]bool) map[string]bool
+	reach = func(m string, stack map[string]bool) map[string]bool {
+		if !strings.HasPrefix(m, "@") {
+			return map[string]bool{m: true}
+		}
+		out := map[string]bool{}
+		r, ok := d.Roles[m[1:]]
+		if !ok || stack[m] {
+			return out
+		}
+		stack[m] = true
+		for _, x := range r.Members {
+			for p := range reach(x, stack) {
+				out[p] = true
+			}
+		}
+		delete(stack, m)
+		return out
+	}
+	bad := func(members []string) bool {
+		seen := map[string]bool{}
+		for _, m := range members {
+			for p := range reach(m, map[string]bool{}) {
+				if seen[p] {
+					return true
+				}
+				seen[p] = true
+			}
+		}
+		return false
+	}
+	for _, r := range d.Rules {
+		if bad(r.Members) {
+			return true
+		}
+	}
+	for _, r := range d.Roles {
+		if bad(r.Members) {
+			return true
+		}
+	}
+	return false
 }

@@ -39,12 +39,12 @@ type Rule struct {
 	Pattern   string   `json:"pattern"`
 	Threshold int      `json:"threshold"`
 	Members   []string `json:"members"`
-	Source    string   `json:"source,omitempty"` // "signers" (default) or "approvals"
+	Source    string   `json:"source,omitempty"`
 }
 
 // Doc is a delegation document.
 type Doc struct {
-	Principals         map[string]string `json:"principals"` // name -> public key (hex)
+	Principals         map[string]string `json:"principals"`
 	Roles              map[string]Role   `json:"roles,omitempty"`
 	Rules              []Rule            `json:"rules"`
 	Default            string            `json:"default,omitempty"` // "allow" or "deny" (default)
@@ -65,13 +65,29 @@ func (d *Doc) defaultEffect() string {
 	return d.Default
 }
 
-// DelegationError reports an invalid or unsupported delegation document.
 type DelegationError struct{ Msg string }
 
 func (e *DelegationError) Error() string { return e.Msg }
 
-// ExpansionTooLarge is returned when a threshold exceeds MaxCombinations.
 type ExpansionTooLarge struct{ DelegationError }
+
+// DuplicateMemberError is returned when a threshold lists the same member twice.
+// Python's compile.py accepts this and counts the member twice; gittuf accepts
+// it and counts it once (see FINDINGS.md, Finding 4). Both are surprising, so
+// the Go compiler rejects it.
+type DuplicateMemberError struct{ DelegationError }
+
+func checkDuplicates(members []string) error {
+	seen := map[string]bool{}
+	for _, m := range members {
+		if seen[m] {
+			return &DuplicateMemberError{DelegationError{fmt.Sprintf(
+				"member %s is listed more than once; each principal may count only once toward a threshold", m)}}
+		}
+		seen[m] = true
+	}
+	return nil
+}
 
 func errf(format string, a ...any) error {
 	return &DelegationError{fmt.Sprintf(format, a...)}
@@ -239,6 +255,9 @@ func ExpandThreshold(members []string, threshold int, roles map[string]Role, sta
 	if threshold < 1 || threshold > len(members) {
 		return nil, errf("threshold %d impossible with %d members", threshold, len(members))
 	}
+	if err := checkDuplicates(members); err != nil {
+		return nil, err
+	}
 	n, err := CountThreshold(members, threshold, roles, stack)
 	if err != nil {
 		return nil, err
@@ -257,8 +276,16 @@ func ExpandThreshold(members []string, threshold int, roles map[string]Role, sta
 	out := map[string]pset{}
 	combinations(len(members), threshold, func(chosen []int) {
 		product(per, chosen, func(pick []pset) {
+			// Each chosen member must be met by its own signers: if two
+			// members' witnesses overlap, a signer would count twice.
 			u := union(pick...)
-			out[u.key()] = u
+			size := 0
+			for _, p := range pick {
+				size += len(p)
+			}
+			if len(u) == size {
+				out[u.key()] = u
+			}
 		})
 	})
 	return minimize(out), nil
