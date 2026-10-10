@@ -1,0 +1,10 @@
+[package]
+name = "gcedar-smt"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+cedar-policy = "=4.13.0"
+cedar-policy-symcc = "=0.7.0"
+tokio = { version = "1", features = ["macros", "rt"] }

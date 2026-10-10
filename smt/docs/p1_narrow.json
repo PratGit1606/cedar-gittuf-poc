@@ -1,0 +1,1 @@
+{"principals":{"alice":"alice","bob":"bob","carol":"carol"},"rules":[{"name":"main","pattern":"refs/heads/main","threshold":2,"members":["alice","bob"]}]}
