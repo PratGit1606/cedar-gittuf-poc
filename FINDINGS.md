@@ -11,13 +11,13 @@
 
 The harness (`oracle/`) drives gittuf through its public `experimental/gittuf`
 API, which is the same code the CLI calls: `trust init`, `trust add-policy-key`,
-`policy init`, `policy add-key`, `policy add-rule`, `policy stage` and `apply`,
-`rsl record`, `attest authorize`, and `verify-ref --latest-only`. Principals that
-need a tufv02 *person* (several IDs or keys) are added by running the gittuf
-CLI, built from the same clone, because the public Go API needs internal
-types to construct a person. Every repository, key and signature is real:
-ed25519 SSH keys come from `ssh-keygen`, and RSL entries are SSH-signed Git
-commits.
+`policy init`, `policy add-key`, `policy add-rule`, `policy sign`, `policy stage`
+and `apply`, `rsl record`, `attest authorize`, and `verify-ref --latest-only`.
+Principals that must be tufv02 *persons* (in our tests, two principals sharing
+one key) are added with the gittuf CLI, built from the same clone, because the
+public Go API needs internal types to construct a person. Every repository,
+key and signature is real: ed25519 SSH keys come from `ssh-keygen`, RSL entries
+are SSH-signed Git commits, and authorizations are DSSE envelopes.
 
 How a push is simulated (`World.Push`):
 1. A new commit goes on a scratch feature branch, and the branch gets an RSL entry.
@@ -25,134 +25,324 @@ How a push is simulated (`World.Push`):
    for `ref`, covering the move from the current tip to that commit's tree.
 3. `ref` is fast-forwarded and an RSL entry is recorded, signed by the
    "pusher" or left unsigned.
-4. gittuf runs `VerifyRef(ref, WithLatestOnly())`. No error means allow.
+4. gittuf runs `VerifyRef(ref, WithLatestOnly())`. No error means allow. Any
+   error other than "gittuf policy verification failed" fails the test as a
+   harness problem, so it is never counted as a deny.
 
-On the Cedar side, `signers` = {pusher} ∪ attestors, restricted to principals in
-the document.
+On the Cedar side, Phase A is simulated for each mode: the set of principals,
+or in gittuf mode the set of distinct key IDs, whose key signed the RSL entry
+or the attestation.
 
-## How gittuf actually decides (read from source at the commit above)
+Run with: `cd oracle && go test -v .` (`ORACLE_DOCS=300` for the large random
+run, `ORACLE_DEBUG=1` for gittuf's own trace).
 
-These facts determine what we must model. Every line reference is to that commit.
+## Two compile modes
 
-* **Every matching rule is an alternative; the order only decides which is tried first.**
-  `findVerifiersForPathIfProtected` (`internal/policy/policy.go:489`) returns a
-  verifier for every rule whose pattern matches. Then
+`go/gcedar` now has two modes (`CompileMode`). Strict mode is unchanged and
+still byte-identical to `compile.py`.
+
+| | `strict` (the original POC) | `gittuf` (mirrors the commit above) |
+|---|---|---|
+| Several rules match a ref | the first matching rule decides | any matching rule may satisfy |
+| No rule matches | `default` (allow or deny) | always allowed (unprotected); an explicit `default: deny` is rejected |
+| Principal identity in Cedar | name | **key ID**; principals that share a key collapse into one |
+| Duplicate members | counted once per listing | counted once; a rule with fewer distinct keys than its threshold is kept but gets no permits (it can never be met) |
+| Patterns | `*` only (anything else is rejected) | `*` uses `like`; positive classes `[ab]` and `[0-9]` become a bounded OR of `like`; `?`, `[!..]` and escapes are matched in **Phase A** and passed as `context.matchedPatterns` |
+| Roles, `approvals` source, forbid-self-approval | supported | rejected (no gittuf equivalent; see CAPABILITIES.md) |
+
+Gittuf mode's schema is `context: { signers: Set<User>, matchedPatterns: Set<String> }`.
+
+## Summary of results
+
+| Test | Verdicts | strict vs gittuf | gittuf mode vs gittuf |
+|---|---:|---:|---:|
+| Hand-written 2-of-3 | 6 | 0 differ | 0 differ |
+| Rule-matching probe | 16 | **6 differ** | 0 differ |
+| Pattern probe | 10 | 6 can't compile | 0 differ |
+| Unprotected and default probe | 7 | **2 differ** | 2 can't compile (default deny, by design) |
+| Duplicates and shared-key probe | 9 | **5 differ** | 0 differ |
+| Roles expanded into gittuf rules vs strict-mode roles | 64 | 0 differ | n/a (roles rejected) |
+| **Random documents** (300 docs, 8 pushes each) | 2,400 | 1,575 differ (1,536 can't compile, **39 semantic**) | **0 differ** |
+
+What the random documents contain: 41 have two principals sharing a key, 104
+list a member twice, and 144 use a pattern that needs Phase A. Of the 2,400
+pushes, gittuf allowed 1,270.
+
+**The oracle catches errors (mutation check).** I broke gittuf mode on purpose
+and reran 100 random documents:
+* Without key dedup, 13 of 800 verdicts disagreed with gittuf.
+* With Phase A never reporting pattern matches, 43 of 800 disagreed.
+
+Both mutations were reverted. Strict mode is effectively the "first match wins"
+mutant, and it disagrees too.
+
+**What this does and does not show.** Gittuf mode agrees with gittuf's
+`verify-ref --latest-only` on flat documents built from these features: `git:`
+rules, SSH keys, one pattern per rule, a threshold, signatures from the RSL
+entry and from reference authorizations, shared keys, and duplicate members.
+It does not show agreement on anything listed under "Not modelled" below.
+
+## How gittuf decides (from source, confirmed by the probes)
+
+Line references are to the commit above.
+
+* **Matching rules are alternatives.** `findVerifiersForPathIfProtected`
+  (`internal/policy/policy.go:489`) returns one verifier per matching rule, and
   `verifyGitObjectAndAttestationsUsingVerifiers` (`internal/policy/verify.go:1308`)
-  accepts if any one verifier meets its threshold. Our compiler uses first-match-wins,
-  which is stricter. To be confirmed by randomized testing.
-* **Terminating rules cut off later rules only when the matching rule has its own delegated rule file**
-  (`policy.go`, the `break` sits inside `if s.HasTargetsRole(...)`).
-* **Unprotected refs are allowed.** If no rule matches, the ref is unprotected
-  (`verify.go:1110`). gittuf has no "default deny" (a catch-all `*`
-  rule plays that role); the trailing `gittuf-allow-rule` is never turned into a verifier.
-* **Patterns** use `fnmatch.Match(pattern, "git:"+ref, 0)`. With flags 0, `*`
-  matches `/`, and `?` and `[...]` are also wildcards. Our compiler rejects `?` and `[]`.
-* **Signers for a `git:` rule** are the signature on the **RSL entry** commit
-  (at most one Git signature is counted) plus the DSSE signatures on the
-  reference-authorization attestation for (ref, from-commit, to-tree), plus GitHub
-  approvals mapped through `associatedIdentities`. The *commit's* own signature is
-  **not** consulted for `git:` rules; commit signatures are only checked for
-  `file:` rules.
-* **Threshold counting** is per **principal ID**, and each **key** is credited at
-  most once (`usedKeyIDs`, `internal/policy/signature.go:69`).
+  accepts if any one of them is met. Confirmed below.
+* **Unprotected refs are allowed** (`verify.go:1110`). gittuf has no default
+  deny. A catch-all `*` rule plays that role, and the built-in trailing
+  `gittuf-allow-rule` is never turned into a verifier.
+* **Patterns** are matched with `fnmatch.Match("git:"+pattern, "git:"+ref, 0)`.
+  With flags 0, `*` matches `/`, and `?`, `[..]` and `[!..]` / `[^..]` are wildcards.
+  Despite the comment "We validate pattern when it's added", no validation
+  happens when a rule is added.
+* **Which signatures count for `git:` rules:** the RSL entry's signature
+  (at most one Git signature), the DSSE signatures on the reference
+  authorization for (ref, from, to-tree), and GitHub approvals mapped through
+  `associatedIdentities`. The commit's own signature does not count. Confirmed below.
+* **Threshold counting** is over distinct principal IDs, and each key is
+  credited at most once (`usedKeyIDs`, `internal/policy/signature.go:69`).
+* **Terminating rules** cut off the remaining rules in a file only when the
+  matching rule has its own delegated rule file. At this commit, though,
+  `terminating` **cannot be set** for a user rule through the Go API or the CLI:
+  `AddRule` hard-codes `false` (`internal/tuf/v02/targets.go:100`), and only the
+  built-in allow rule is terminating. **Not probed:** it can only be reached by
+  hand-editing and re-signing the metadata.
 
-## Hand-written end-to-end case (`TestHandwritten2of3`, `TestHandwrittenCedarAgrees`)
+## Finding 1: matching rules are alternatives, not first-match (strict mode is wrong for gittuf)
 
-Rule `protect-main`: 2-of-{alice, bob, carol} on `git:refs/heads/main`.
+Repro: `TestProbeRuleMatching`. Principals alice, bob and carol; every push is to `refs/heads/main`.
 
-| RSL entry signed by | Attestation signed by | gittuf | Cedar |
-|---|---|---|---|
-| alice | bob | allow | allow |
-| alice | (none) | deny | deny |
-| mallory (not in policy) | alice, carol | allow | allow |
-| mallory | alice | deny | deny |
-| (unsigned) | bob, carol | allow | allow |
-| alice | alice | deny | deny |
+| Rules, in order | RSL entry | Attestation | gittuf | strict | gittuf mode |
+|---|---|---|---|---|---|
+| [main 2-of-{a,b}, main 1-of-{c}] | carol | | allow | **deny** | allow |
+| [main 2-of-{a,b}, main 1-of-{c}] | bob | carol | allow | **deny** | allow |
+| [main 1-of-{c}, main 2-of-{a,b}] | alice | bob | allow | **deny** | allow |
+| [heads/* 1-of-{a}, main 2-of-{b,c}] | bob | carol | allow | **deny** | allow |
+| [main 2-of-{b,c}, heads/* 1-of-{a}] | alice | | allow | **deny** | allow |
+| [main 2-of-{b,c}, heads/* 1-of-{a}] | alice | bob | allow | **deny** | allow |
 
-The gittuf debug trace (`ORACLE_DEBUG=1`) confirms that the denials are threshold
-failures. In the first row alice is credited from the RSL entry's Git signature
-and bob from the attestation. In the last row, alice's attestation signature is
-skipped with "has already been counted towards the threshold".
+The other 10 pushes agree in all three. Classification: **(a) our semantics
+model was wrong**, now covered by gittuf mode.
 
-## Finding 1: duplicate members in a rule (disagreement)
+Consequence for the design: in gittuf a broad rule always weakens a narrower
+one, whatever their order. Last row: `main` is "protected" by 2-of-{bob, carol},
+but alice alone may push to it because `refs/heads/*` trusts her. Tightening
+a sub-namespace takes a terminating rule that has its own delegated rule file
+(see above), which the CLI cannot currently create. Strict mode shows Cedar can
+express both behaviours. Which one gittuf wants is a gittuf design question,
+not a Cedar limitation.
 
-Repro: `TestProbeDuplicateMembers`.
+## Finding 2: patterns
 
-| Rule | Signers | gittuf | Cedar |
-|---|---|---|---|
-| 2-of-[alice, alice] | alice | deny | **allow** |
-| 2-of-[alice, alice] | alice, bob | deny | **allow** |
-| 2-of-[alice, alice, bob] | alice | deny | **allow** |
-| 2-of-[alice, alice, bob] | bob | deny | deny |
-| 2-of-[alice, alice, bob] | alice, bob | allow | allow |
+Repro: `TestProbePatterns` (end to end), plus `go/gcedar/pattern_test.go`, which
+evaluates Cedar's actual `like` with cedar-go and compares it with gittuf's own
+fnmatch library.
 
-What gittuf does: `AddRule` (`internal/tuf/v02/targets.go:88`) checks
-`len(authorizedPrincipalIDs) < threshold` on the **list**, then stores
-`set.NewSetFromItems(...)`, which removes duplicates. Counting at verify time is
-per distinct principal. So gittuf **accepts** `2-of-[alice, alice]` at write time,
-and that rule can then never be satisfied. The CLI passes `--authorize` values
-through unchanged (`internal/cmd/policy/addrule/addrule.go`), so this can be
-reached from the CLI, e.g. `--authorize X --authorize X --threshold 2`, or the same
-key given once through `--authorize-key` and once as an ID through `--authorize`.
+| Pattern | Ref | Signer | gittuf | strict | gittuf mode (how it matches) |
+|---|---|---|---|---|---|
+| `refs/heads/*` | `refs/heads/feature/x` | bob | deny | deny | deny (`like`) |
+| `refs/heads/*/main` | `refs/heads/a/b/main` | bob | deny | deny | deny (`like`) |
+| `refs/heads/rel-?` | `refs/heads/rel-1` | bob | deny | can't compile | deny (Phase A) |
+| `refs/heads/rel-?` | `refs/heads/rel-10` | bob | allow (unprotected) | can't compile | allow (Phase A) |
+| `refs/heads/rel-[ab]` | `refs/heads/rel-a` | bob | deny | can't compile | deny (`like` OR) |
+| `refs/heads/rel-[!a]*` | `refs/heads/rel-b1` | bob | deny | can't compile | deny (Phase A) |
 
-What we do: `compile.py`, its Go port and `reference.py` count a duplicated
-member once per occurrence, so alice alone meets 2-of-[alice, alice].
+Can Cedar's `like` express what gittuf accepts?
+* **`*`-only patterns: yes, exactly.** In both, `*` matches across `/`.
+  `TestStarPatternsAgreeWithFnmatch` checks 9 patterns against about 3,000 refs
+  with cedar-go, and they agree with fnmatch on every one.
+* **Positive classes (`[ab]`, `[a-c]`, `[0-9]`): yes, by rewriting.** Each class
+  becomes an OR of `like` patterns (`TestBracketRewriteMatchesFnmatch` checks this
+  is exact on the same corpus). The count is the product of the class sizes, so
+  gittuf mode caps it at 64 alternatives and falls back to Phase A above that.
+* **`?`, negated classes and escapes: no.** `like` has no single-character
+  wildcard. `TestLikeCannotExpressQuestionMark` searches all 2.4M `like`
+  patterns up to length 7 over the relevant alphabet and finds none that
+  reproduces `rel-?` or `rel-[!1]`. The general argument for `rel-?`: rel-1 and
+  rel-2 differ in their last character, so the pattern must put a `*` there.
+  Whatever follows that `*` must be a common suffix of "1" and "2", which is
+  empty, so the pattern also matches rel-10. In principle an OR over every
+  possible character would work, but Cedar strings are Unicode, so that is not
+  practical. **These patterns have to be matched in Phase A.** The host passes the
+  matching patterns as `context.matchedPatterns`, and Cedar analysis then
+  treats "does this pattern match this ref" as an unconstrained input.
 
-Classification:
-* **(a) Our semantics model is wrong.** Thresholds count distinct principals.
-  Our behaviour is also the less safe one: a duplicated member lowers the
-  effective threshold.
-* **(c) gittuf quirk.** The write-time check should use the length of the set. As
-  written, gittuf will store a rule that can never be satisfied, which locks the
-  namespace for everyone.
+Classification: **(b) Cedar limitation** for `?` and negated classes. **(a) Our
+model was too narrow** for positive classes, which are now handled. One fnmatch
+quirk to note: a class that starts with `]` (`[]a]`) is parsed as empty instead
+of as a literal `]`. Phase A uses the same library, so gittuf mode reproduces
+that quirk by construction.
 
-Not fixed yet, as requested.
+## Finding 3: unprotected refs and default deny
 
-## Finding 2: two principals sharing one key (disagreement, comes from Phase A)
+Repro: `TestProbeUnprotected`. One rule: main 1-of-{alice}. Pushes to `refs/heads/other`.
 
-Repro: `TestProbeSharedKey`. This uses two tufv02 persons, p1 and p2, with the
-same SSH key; p3 has its own key.
+| Document | Signer | gittuf | strict | gittuf mode |
+|---|---|---|---|---|
+| default allow | unsigned or mallory | allow | allow | allow |
+| default deny | unsigned or mallory | allow | **deny** | can't compile (by design) |
+| + catch-all `*` 1-of-{a,b,c} | unsigned or mallory | deny | deny | deny |
+| + catch-all `*` 1-of-{a,b,c} | bob | allow | allow | allow |
 
-| Rule | What was signed | gittuf | Our pipeline |
-|---|---|---|---|
-| 2-of-[p1, p2] | RSL entry by the shared key | deny | allow if Phase A reports {p1, p2} |
-| 2-of-[p1, p2] | RSL entry + attestation by the shared key | deny | allow if Phase A reports {p1, p2} |
-| 2-of-[p1, p2, p3] | RSL entry by the shared key | deny | allow if Phase A reports {p1, p2} |
-| 2-of-[p1, p2, p3] | shared-key RSL entry + attestation by p3 | allow | allow |
+gittuf has no notion of default deny. A catch-all rule is the gittuf way to
+get it, and because rules are alternatives, the catch-all also acts as a floor
+for every other namespace. Classification: **(a)**. Gittuf mode rejects
+`default: deny` instead of silently ignoring it.
 
-What gittuf does: `policy add-person` accepts a second person with an existing
-key, which is not rejected. At verify time `usedKeyIDs` credits that key to only
-the first principal tried, so one key never counts twice.
+## Finding 4: duplicate members (gittuf lockout bug, and our model counted twice)
 
-What we do: Phase B (Cedar) has no notion of keys and only sees principal names,
-so the outcome depends entirely on Phase A. I ran the real Python Phase A
-(`gcedar/verify.py`) with p1 and p2 sharing a public key:
+Repro: `TestProbeDuplicatesModes`, `TestProbeDuplicateMembers`, and the
+standalone CLI script `repro/gittuf-duplicate-members-lockout.sh`.
 
+| Rule | Signers | gittuf | strict | gittuf mode |
+|---|---|---|---|---|
+| 2-of-[alice, alice] | alice | deny | **allow** | deny |
+| 2-of-[alice, alice] | alice, bob | deny | **allow** | deny |
+| 2-of-[alice, alice, bob] | alice | deny | **allow** | deny |
+| 2-of-[alice, alice, bob] | alice, bob | allow | allow | allow |
+
+* **gittuf quirk (c), arguably a bug:** `AddRule` (`internal/tuf/v02/targets.go:88`)
+  checks `len(authorizedPrincipalIDs) < threshold` on the list as given, then
+  stores the deduplicated set. So it accepts a rule that can never be met and
+  locks the namespace. The CLI passes `--authorize` through unchanged. Running
+  `repro/gittuf-duplicate-members-lockout.sh` against this commit gives:
+  ```
+  == control: alice listed once, threshold 2 (expected: rejected)
+  Error: insufficient keys to meet threshold
+  == bug: alice listed twice, threshold 2 (accepted)
+  Rule protect-main:
+      Refs affected:
+          git:refs/heads/main
+      Authorized keys:
+          SHA256:1HJaxYUJb0b6FzDryUlkDIW3JZwJZkyVe8d5NoYORZo
+      Required valid signatures: 2
+  == alice (the only authorized principal) pushes to main
+  Error: verifying Git namespace policies failed, gittuf policy verification failed
+  RESULT: verification failed: the rule stored as 2-of-{alice} can never be met; main is locked
+  ```
+  Script usage: `GITTUF=/path/to/gittuf repro/gittuf-duplicate-members-lockout.sh`.
+  It uses only the CLI, `git` and `ssh-keygen`.
+* **(a) Our model is wrong in strict mode:** it counts a duplicated member once
+  per listing, which quietly lowers the threshold. Strict mode is left as is
+  (as instructed). Gittuf mode counts distinct keys and reproduces gittuf,
+  lockout included, and the compiler reports the dead rule as a warning in
+  `Compiled.Warnings`.
+
+## Finding 5: principals sharing a key (bug in our Phase A)
+
+Repro: `TestProbeSharedKey`, `TestProbeDuplicatesModes`. p1 and p2 are two
+tufv02 persons with the same SSH key; p3 (carol) has her own key.
+
+| Rule | What was signed | gittuf | strict (Python-style Phase A) | gittuf mode |
+|---|---|---|---|---|
+| 2-of-[p1, p2, p3] | RSL entry by the shared key | deny | **allow** | deny |
+| 2-of-[p1, p2, p3] | RSL entry and attestation by the shared key | deny | **allow** | deny |
+| 2-of-[p1, p2, p3] | shared key + carol | allow | allow | allow |
+| 2-of-[p1, p2] | RSL entry by the shared key | deny | **allow** | deny |
+
+The real Python Phase A (`gcedar/verify.py`), run with p1 and p2 sharing a key:
 ```
 one signature, filed under p1 only       signers=['p1'] allowed=False
 same signature filed under p1 and p2     signers=['p1', 'p2'] allowed=True
 ```
+* **(d) A bug in our Phase A**, and a security-relevant one: one key holder can
+  meet 2-of-[p1, p2]. Cedar never sees keys, so the fix has to be on the host.
+  Gittuf mode does it by making the key ID the Cedar identity. A Phase A
+  invariant ("a key counts once") becomes structural, so Cedar analysis can rely
+  on it, provided Phase A reports key IDs honestly.
+* **(c) Minor gittuf quirk:** a policy may contain two persons with the same
+  key, and the credit goes to whichever principal is iterated first.
+* Known limit of gittuf mode: a person with *several* keys counts once in gittuf
+  but would count once per key in gittuf mode. Our JSON has one key per
+  principal, so this does not come up, but it would need Phase A to map keys
+  to persons first.
 
-So whoever holds the shared key can meet 2-of-[p1, p2] by submitting the same
-signature under both names.
+## Finding 6: the commit's signature is irrelevant to `git:` rules
 
-Classification:
-* **(d) A bug in our Phase A**, and a security-relevant one. The fix belongs on the
-  host side: credit each verified key at most once, as gittuf does. It cannot
-  be fixed in Cedar, which never sees keys. This is a concrete example of the
-  Phase A/B boundary: "one key counts once" is a Phase A invariant that Cedar
-  analysis cannot check.
-* There is also a minor **(c) gittuf quirk**: the policy is allowed to contain
-  two persons with the same key at all, and the credit goes to whichever
-  principal is iterated first.
+Repro: `TestProbeCommitVsRSLSignature`. Rule: main 1-of-{alice}.
 
-Not fixed yet, as requested.
+| Commit signed by | RSL entry signed by | gittuf |
+|---|---|---|
+| alice | (unsigned) | deny |
+| alice | mallory | deny |
+| mallory | alice | allow |
 
-## Status
+This matches the source: for `git:` rules only the RSL entry's signature and
+authorizations count, and commit signatures are only checked for `file:`
+rules. Our model agrees by construction, because Phase A only collects RSL entry
+and authorization signers. For the design doc: "who signed the commit" is a
+different fact from "who authorized the ref update", and a Cedar context
+should keep them separate (e.g. `context.commitSigners` vs `context.signers`).
+Classification: none (agreement), recorded because the task asked for it.
 
-* The hand-written case works end to end, and Cedar agrees on all 6 scenarios.
-* Duplicate members and shared keys have been probed (above).
-* Not yet done: randomized documents; targeted probes for rule order (first-match
-  vs any-match), `*` vs `/`, `?`/`[]`, terminating rules, delegation to rule
-  files (our "roles"), unprotected refs and default deny, RSL entry vs commit
-  signatures.
+## Finding 7: delegated rule files are an OR across levels (our roles are not)
+
+Repro: `TestProbeDelegatedRuleFile`. In `targets`, rule `team` is main
+2-of-{alice, bob} and delegates to rule file `team` (signed by alice and bob),
+which contains `team-main`, main 2-of-{carol, dave}. Separately, rule `other`
+is refs/heads/other 1-of-{bob}.
+
+| Push | gittuf |
+|---|---|
+| main: alice + bob (the delegating rule itself) | allow |
+| main: carol + dave (the delegated rule alone) | allow |
+| main: alice + carol (one from each level) | **deny**: signatures do not combine across levels |
+| main: carol alone | deny |
+| *with `team-anything: *` 1-of-{carol} added to the team file:* main, carol alone | **allow**: a delegated file can set a weaker rule than its delegator |
+| ... other: carol | deny: delegated rules only apply where the delegating rule matches |
+| ... other: bob | allow |
+
+Our "roles" are nested thresholds (e.g. 2-of-[alice, @team]), which require
+signatures from several levels together. gittuf delegation is the opposite
+shape: each level is a complete alternative. As instructed, roles are not
+forced onto delegated rule files.
+
+However, roles are **not** beyond gittuf's expressive power.
+`TestRolesAsExpandedGittufRules` writes the compiler's expansion (one minimal
+approver set per permit) as plain gittuf rules, one per set with threshold =
+set size. Since rules are alternatives, gittuf then agrees with strict-mode
+Cedar on all 64 signer subsets across two nested documents. Both systems reach
+nested thresholds only by enumeration. CAPABILITIES.md records roles as
+"compact notation plus analyzability on the Cedar side", not as Cedar-only
+semantics.
+
+## Minor
+
+* `compile.py` crashes on `"rules": null` (`TypeError`). Left as is.
+* `TestRandomAgainstGittuf` takes about 30 s for 40 documents and about 4 min for
+  300 (4 in parallel). One gittuf world takes about 0.3 to 1 s, or about 3 s
+  with CLI-created persons.
+
+## Classification summary
+
+| # | Disagreement | Class | Status |
+|---|---|---|---|
+| 1 | First-match vs alternatives | (a) model | gittuf mode matches; strict mode kept as the Cedar-only variant |
+| 2a | `?`, `[!..]` patterns | (b) Cedar limitation | Phase A matching (`context.matchedPatterns`) |
+| 2b | `[ab]` patterns | (a) model too narrow | bounded `like` OR in gittuf mode |
+| 3 | Default deny | (a) model | gittuf mode rejects it; use a catch-all rule |
+| 4 | Duplicate members | (a) model + (c) gittuf lockout bug | gittuf mode matches; CLI reproducer written; strict mode not fixed (as instructed) |
+| 5 | Shared keys | (d) our Phase A bug + (c) gittuf quirk | gittuf mode uses key IDs as identities; Python Phase A not fixed (as instructed) |
+| 6 | Commit vs RSL signature | agreement | — |
+| 7 | Roles vs delegated rule files | different features (roles are expressible in gittuf by expansion) | CAPABILITIES.md; not forced |
+
+## Not modelled (gittuf is richer than our JSON)
+
+I extended the JSON only as far as the probes needed. In gittuf mode a
+principal's value is its key ID; the `key:<name>` form for shared keys exists
+only in the test harness. Left out, and therefore not covered by the claim
+above:
+* rules with several patterns (`--rule-pattern` repeated); persons with several keys;
+* GitHub app approvals (`associatedIdentities`), reference authorizations
+  that cover a different from/to, and `verify-mergeable`'s threshold−1 relaxation;
+* global rules (`threshold` and `block-force-pushes`), which are verified
+  separately against all principals;
+* `file:` rules (commit signatures, the changed-paths walk);
+* tags (`verifyTagEntry` also requires a signed tag object);
+* terminating rules (not settable, see above) and delegated rule files as
+  compile targets;
+* full-history verification (`VerifyRefFull`), policy changes partway through
+  the history, RSL skip annotations and recovery;
+* policy metadata thresholds (root and targets signatures) and expiry.

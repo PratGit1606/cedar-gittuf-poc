@@ -1,7 +1,6 @@
 package oracle
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/pratham/gcedar/gcedar"
@@ -21,7 +20,7 @@ func gittufVerdict(t *testing.T, w *World, p push) bool {
 	if err != nil {
 		t.Fatalf("harness: %v", err)
 	}
-	if verr != nil && !strings.Contains(verr.Error(), "gittuf policy verification failed") {
+	if verr != nil && !isPolicyDenial(verr) {
 		t.Fatalf("unexpected gittuf error (not a policy denial): %v", verr)
 	}
 	return ok

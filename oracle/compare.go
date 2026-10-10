@@ -215,3 +215,9 @@ func CedarVerdict(doc *gcedar.Doc, ref string, s Scenario) (bool, error) {
 	}
 	return d.Allowed, nil
 }
+
+// isPolicyDenial distinguishes gittuf's "policy not met" from other failures
+// (which would indicate a harness problem, not a verdict).
+func isPolicyDenial(verr error) bool {
+	return strings.Contains(verr.Error(), "gittuf policy verification failed")
+}
