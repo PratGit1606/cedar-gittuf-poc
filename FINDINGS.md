@@ -396,12 +396,18 @@ duplicate members; for documents with them, we deliberately differ.
 **(c) Field-signature encoding limits.** `Canonical` reproduces Python's
 `json.dumps(..., sort_keys=True, separators=(",",":"))` byte for byte for
 strings (including non-ASCII, control characters and DEL), booleans, null,
-integers within int64, arrays, objects, and floats in their shortest
-representation (`TestCanonicalMatchesPython`, 13 values). Two known
-differences remain: integers that need more than 64 bits (Go goes through
-float64, Python keeps the exact integer), and JSON number text that is not in
-shortest form, such as `1.50` (Python prints `1.5`, and so does Go after
-parsing, but only if the value reaches `Canonical` as a parsed number rather
-than as the original text). **Once the Python code is removed, the Go
+integers within int64, arrays, objects, and floats (`TestCanonicalMatchesPython`,
+13 values). I checked the cases from the original note against both implementations:
+
+| JSON text | Python | Go (field doc decoded from JSON) |
+|---|---|---|
+| `1.50` | `1.5` | `1.5`: same; my earlier note was wrong to list this |
+| `1e2` | `100.0` | `100.0`: same |
+| `1` | `1` | `1`: same, **after a fix**. Before it, `SignedField` used Go's default float64 decoding and encoded `1.0`, so an integer-valued field signed by Python failed verification in Go. Fixed by decoding values with `json.Number` (`TestFieldsIntegerValueFromJSON`, which fails without the fix). |
+| `123456789012345678901234` | exact integer | `1.2345678901234569e+23`: **differs**. Integers beyond int64 go through float64. |
+
+One remaining difference, then: integers that need more than 64 bits. A Go
+caller that builds values by hand must also pass integers as `int`, `int64`
+or `json.Number`, not `float64`. **Once the Python code is removed, the Go
 encoding is the specification**, and these cases are defined by `Canonical`,
 not by Python.

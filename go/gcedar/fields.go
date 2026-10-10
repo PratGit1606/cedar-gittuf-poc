@@ -1,6 +1,7 @@
 package gcedar
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -51,6 +52,27 @@ type FieldPolicy struct {
 type SignedField struct {
 	Value any               `json:"value"`
 	Sigs  map[string]string `json:"sigs"`
+}
+
+// UnmarshalJSON decodes Value with json.Number so integers stay integers:
+// the default float64 decoding would encode 1 as "1.0" in Canonical, while
+// the signer (and Python's json.dumps) encoded "1".
+func (f *SignedField) UnmarshalJSON(b []byte) error {
+	var raw struct {
+		Value json.RawMessage   `json:"value"`
+		Sigs  map[string]string `json:"sigs"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	f.Sigs = raw.Sigs
+	f.Value = nil
+	if len(raw.Value) == 0 {
+		return nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw.Value))
+	dec.UseNumber()
+	return dec.Decode(&f.Value)
 }
 
 // FieldDoc is a document of signed fields.

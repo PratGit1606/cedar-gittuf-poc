@@ -232,3 +232,20 @@ sys.stdout.write(compile_fields(json.loads(sys.argv[2])))
 		t.Errorf("go:\n%s\npython:\n%s", got, out)
 	}
 }
+
+// A field document read from JSON must verify when the value is an integer:
+// default float64 decoding would re-encode 1 as "1.0" and break the signature.
+func TestFieldsIntegerValueFromJSON(t *testing.T) {
+	signed := field(t, "targets", map[string]any{"a": 1, "big": json.Number("12345678901234")}, []string{"k1", "k3"}, false)
+	raw, _ := json.Marshal(map[string]any{"fields": map[string]any{
+		"expires": field(t, "expires", "2027-01-01", []string{"k2"}, false),
+		"targets": signed,
+	}})
+	var d FieldDoc
+	if err := json.Unmarshal(raw, &d); err != nil {
+		t.Fatal(err)
+	}
+	if r := newFieldVerifier(t).Check(&d); !r.Accepted {
+		t.Errorf("integer-valued field decoded from JSON failed verification: %+v", r)
+	}
+}
