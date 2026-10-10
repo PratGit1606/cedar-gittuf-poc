@@ -2,6 +2,7 @@
 //
 //	gcedar compile doc.json              # policies to stdout
 //	gcedar compile -out dir doc.json     # dir/policies.cedar, dir/schema.cedarschema, dir/meta.json
+//	gcedar demo                          # end-to-end example (port of demo.py)
 package main
 
 import (
@@ -15,8 +16,12 @@ import (
 )
 
 func main() {
+	if len(os.Args) >= 2 && os.Args[1] == "demo" {
+		demo()
+		return
+	}
 	if len(os.Args) < 2 || os.Args[1] != "compile" {
-		fmt.Fprintln(os.Stderr, "usage: gcedar compile [-out dir] doc.json")
+		fmt.Fprintln(os.Stderr, "usage: gcedar compile [-out dir] doc.json | gcedar demo")
 		os.Exit(2)
 	}
 	fs := flag.NewFlagSet("compile", flag.ExitOnError)
