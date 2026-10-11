@@ -93,12 +93,7 @@ func KeyIDs(doc *Doc, names []string) []string {
 			m[k] = true
 		}
 	}
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
+	return sortedKeys(m)
 }
 
 func gittufMatchExpr(p string) (string, error) {

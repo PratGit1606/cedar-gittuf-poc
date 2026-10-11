@@ -115,18 +115,8 @@ type Verifier struct {
 // bound to the same public key: otherwise one signature filed under both
 // names would count twice (FINDINGS.md, Finding 5).
 func NewVerifier(doc *Doc) (*Verifier, error) {
-	byKey := map[string]string{}
-	names := make([]string, 0, len(doc.Principals))
-	for n := range doc.Principals {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	for _, n := range names {
-		k := strings.ToLower(doc.Principals[n])
-		if other, ok := byKey[k]; ok {
-			return nil, errf("principals %s and %s have the same public key; a key may count only once", other, n)
-		}
-		byKey[k] = n
+	if err := checkSharedKeys(doc.Principals, "principals"); err != nil {
+		return nil, err
 	}
 	c, err := Compile(doc)
 	if err != nil {
@@ -137,6 +127,20 @@ func NewVerifier(doc *Doc) (*Verifier, error) {
 		return nil, err
 	}
 	return &Verifier{Doc: doc, Eval: ev}, nil
+}
+
+// checkSharedKeys rejects two names bound to the same public key (hex,
+// case-insensitive): one signature filed under both would count twice.
+func checkSharedKeys(keys map[string]string, noun string) error {
+	byKey := map[string]string{}
+	for _, n := range sortedKeys(keys) {
+		k := strings.ToLower(keys[n])
+		if other, ok := byKey[k]; ok {
+			return errf("%s %s and %s have the same public key; a key may count only once", noun, other, n)
+		}
+		byKey[k] = n
+	}
+	return nil
 }
 
 // Candidates is the lazy-verification prefilter: only principals named
@@ -165,12 +169,7 @@ func (v *Verifier) Candidates(ref string) []string {
 			}
 		}
 	}
-	names := make([]string, 0, len(out))
-	for n := range out {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	return names
+	return sortedKeys(out)
 }
 
 // PhaseA verifies signatures and interprets forge data.

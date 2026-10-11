@@ -151,9 +151,13 @@ func union(sets ...pset) pset {
 			m[x] = true
 		}
 	}
-	out := make(pset, 0, len(m))
-	for x := range m {
-		out = append(out, x)
+	return sortedKeys(m)
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
 	}
 	sort.Strings(out)
 	return out

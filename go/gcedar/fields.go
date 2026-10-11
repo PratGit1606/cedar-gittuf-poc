@@ -217,13 +217,8 @@ func pyFloat(f float64) (string, error) {
 
 // CompileFields emits one permit per field per minimal key set.
 func CompileFields(p *FieldPolicy) (string, error) {
-	names := make([]string, 0, len(p.Fields))
-	for n := range p.Fields {
-		names = append(names, n)
-	}
-	sort.Strings(names)
 	var b strings.Builder
-	for _, fname := range names {
+	for _, fname := range sortedKeys(p.Fields) {
 		spec := p.Fields[fname]
 		for _, k := range spec.Keys {
 			if _, ok := p.Keys[k]; !ok {
@@ -273,18 +268,8 @@ type FieldVerifier struct {
 // NewFieldVerifier compiles and validates the policy. Like NewVerifier, it
 // refuses two key names bound to the same public key.
 func NewFieldVerifier(p *FieldPolicy) (*FieldVerifier, error) {
-	byKey := map[string]string{}
-	names := make([]string, 0, len(p.Keys))
-	for n := range p.Keys {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	for _, n := range names {
-		k := strings.ToLower(p.Keys[n])
-		if other, ok := byKey[k]; ok {
-			return nil, errf("keys %s and %s have the same public key; a key may count only once", other, n)
-		}
-		byKey[k] = n
+	if err := checkSharedKeys(p.Keys, "keys"); err != nil {
+		return nil, err
 	}
 	text, err := CompileFields(p)
 	if err != nil {
