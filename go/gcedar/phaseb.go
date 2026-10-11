@@ -38,8 +38,8 @@ type Evaluator struct {
 	users    []string
 }
 
-// NewEvaluator parses the compiled policies and validates them against Schema
-// using cedar-go's experimental validator (strict mode).
+// NewEvaluator parses the compiled policies and validates them against their
+// schema (c.Schema) using cedar-go's experimental validator (strict mode).
 func NewEvaluator(doc *Doc, c *Compiled) (*Evaluator, error) {
 	ps, err := cedar.NewPolicySetFromBytes("compiled.cedar", []byte(c.Policies))
 	if err != nil {
@@ -57,9 +57,6 @@ func NewEvaluator(doc *Doc, c *Compiled) (*Evaluator, error) {
 	}
 	return &Evaluator{Compiled: c, ps: ps, users: users}, nil
 }
-
-// ValidatePolicies type-checks a policy set against Schema.
-func ValidatePolicies(ps *cedar.PolicySet) error { return ValidatePoliciesWith(Schema, ps) }
 
 // ValidatePoliciesWith type-checks a policy set against a Cedar schema.
 func ValidatePoliciesWith(schemaText string, ps *cedar.PolicySet) error {
@@ -104,37 +101,26 @@ func (e *Evaluator) Entities(ref string) cedar.EntityMap {
 	return m
 }
 
-// Request builds the Cedar request for a set of facts in the given mode.
+// RequestMode builds the Cedar request for a set of facts; the context record
+// matches the mode's schema.
 func RequestMode(mode Mode, f Facts) cedar.Request {
-	if mode != ModeGittuf {
-		return Request(f)
+	ctx := cedar.RecordMap{
+		"signers":   userSet(f.Signers),
+		"approvals": userSet(f.Approvals),
+		"author":    cedar.NewEntityUID("User", cedar.String(f.Author)),
 	}
-	pats := make([]cedar.Value, len(f.MatchedPatterns))
-	for i, p := range f.MatchedPatterns {
-		pats[i] = cedar.String(p)
+	if mode == ModeGittuf {
+		pats := make([]cedar.Value, len(f.MatchedPatterns))
+		for i, p := range f.MatchedPatterns {
+			pats[i] = cedar.String(p)
+		}
+		ctx = cedar.RecordMap{"signers": userSet(f.Signers), "matchedPatterns": cedar.NewSet(pats...)}
 	}
 	return cedar.Request{
 		Principal: cedar.NewEntityUID("User", cedar.String(f.Pusher)),
 		Action:    cedar.NewEntityUID("Action", "write"),
 		Resource:  cedar.NewEntityUID("Ref", cedar.String(f.Ref)),
-		Context: cedar.NewRecord(cedar.RecordMap{
-			"signers":         userSet(f.Signers),
-			"matchedPatterns": cedar.NewSet(pats...),
-		}),
-	}
-}
-
-// Request builds the strict-mode Cedar request for a set of facts.
-func Request(f Facts) cedar.Request {
-	return cedar.Request{
-		Principal: cedar.NewEntityUID("User", cedar.String(f.Pusher)),
-		Action:    cedar.NewEntityUID("Action", "write"),
-		Resource:  cedar.NewEntityUID("Ref", cedar.String(f.Ref)),
-		Context: cedar.NewRecord(cedar.RecordMap{
-			"signers":   userSet(f.Signers),
-			"approvals": userSet(f.Approvals),
-			"author":    cedar.NewEntityUID("User", cedar.String(f.Author)),
-		}),
+		Context:   cedar.NewRecord(ctx),
 	}
 }
 
