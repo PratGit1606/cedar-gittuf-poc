@@ -135,12 +135,8 @@ func compileGittuf(doc *Doc) (*Compiled, error) {
 	if doc.Default != "" && doc.Default != "allow" {
 		return nil, errf("default must be 'allow' or 'deny'")
 	}
-	seen := map[string]bool{}
-	for _, r := range doc.Rules {
-		if seen[r.Name] {
-			return nil, errf("duplicate rule name %s", r.Name)
-		}
-		seen[r.Name] = true
+	if err := checkRuleNames(doc.Rules); err != nil {
+		return nil, err
 	}
 
 	c := &Compiled{Schema: GittufSchema, Mode: ModeGittuf}
@@ -152,16 +148,17 @@ func compileGittuf(doc *Doc) (*Compiled, error) {
 		c.NPermit++
 	}
 
-	var matches []string
+	var negs []string // "rule j does not match", for the unprotected-ref permit
 	for _, rule := range doc.Rules {
 		if rule.source() != "signers" {
 			return nil, errf("gittuf mode: rule %s: only signers are supported (approvals need GitHub app identities)", rule.Name)
 		}
-		// gittuf write-time checks (internal/tuf/v02/targets.go AddRule): every
-		// listed principal exists, threshold > 0, len(list) >= threshold.
+		// Deliberate deviation: gittuf accepts duplicates (FINDINGS Finding 4).
 		if err := checkDuplicates(rule.Members); err != nil {
 			return nil, fmt.Errorf("rule %s: %w", rule.Name, err)
 		}
+		// gittuf's own write-time checks (internal/tuf/v02/targets.go AddRule):
+		// every listed principal exists, threshold > 0, len(list) >= threshold.
 		ids := make([]string, 0, len(rule.Members))
 		for _, m := range rule.Members {
 			if strings.HasPrefix(m, "@") {
@@ -186,7 +183,7 @@ func compileGittuf(doc *Doc) (*Compiled, error) {
 		if err != nil {
 			return nil, err
 		}
-		matches = append(matches, match)
+		negs = append(negs, "!("+match+")")
 
 		distinct := union(pset(ids))
 		if len(distinct) < rule.Threshold {
@@ -201,25 +198,17 @@ func compileGittuf(doc *Doc) (*Compiled, error) {
 		}
 		sort.Slice(combos, func(a, b int) bool { return lessPset(combos[a], combos[b]) })
 		for _, combo := range combos {
-			users := make([]string, len(combo))
-			for k, u := range combo {
-				q, err := cedarStr(u)
-				if err != nil {
-					return nil, err
-				}
-				users[k] = "User::" + q
+			users, err := entityList("User", combo)
+			if err != nil {
+				return nil, err
 			}
-			emit(fmt.Sprintf("%s && context.signers.containsAll([%s])", match, strings.Join(users, ", ")),
+			emit(fmt.Sprintf("%s && context.signers.containsAll([%s])", match, users),
 				PolicyMeta{Rule: rule.Name, Combo: append([]string{}, combo...)})
 		}
 	}
 
 	// Unprotected refs: no rule matches, so gittuf returns success.
-	parts := make([]string, len(matches))
-	for i, m := range matches {
-		parts[i] = "!(" + m + ")"
-	}
-	none := strings.Join(parts, " && ")
+	none := strings.Join(negs, " && ")
 	if none == "" {
 		none = "true"
 	}

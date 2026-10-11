@@ -90,6 +90,31 @@ func checkDuplicates(members []string) error {
 	return nil
 }
 
+// checkRuleNames rejects two rules with the same name.
+func checkRuleNames(rules []Rule) error {
+	seen := map[string]bool{}
+	for _, r := range rules {
+		if seen[r.Name] {
+			return errf("duplicate rule name %s", r.Name)
+		}
+		seen[r.Name] = true
+	}
+	return nil
+}
+
+// entityList renders ids as a Cedar list body: User::"a", User::"b".
+func entityList(typ string, ids []string) (string, error) {
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		q, err := cedarStr(id)
+		if err != nil {
+			return "", err
+		}
+		parts[i] = typ + "::" + q
+	}
+	return strings.Join(parts, ", "), nil
+}
+
 func errf(format string, a ...any) error {
 	return &DelegationError{fmt.Sprintf(format, a...)}
 }
@@ -348,12 +373,8 @@ func Compile(doc *Doc) (*Compiled, error) {
 	if def != "allow" && def != "deny" {
 		return nil, errf("default must be 'allow' or 'deny'")
 	}
-	seen := map[string]bool{}
-	for _, r := range doc.Rules {
-		if seen[r.Name] {
-			return nil, errf("duplicate rule name %s", r.Name)
-		}
-		seen[r.Name] = true
+	if err := checkRuleNames(doc.Rules); err != nil {
+		return nil, err
 	}
 
 	c := &Compiled{Schema: Schema, Mode: ModeStrict}
@@ -404,15 +425,11 @@ func Compile(doc *Doc) (*Compiled, error) {
 		}
 		sort.Slice(combos, func(a, b int) bool { return lessPset(combos[a], combos[b]) })
 		for _, combo := range combos {
-			users := make([]string, len(combo))
-			for k, u := range combo {
-				q, err := cedarStr(u)
-				if err != nil {
-					return nil, err
-				}
-				users[k] = "User::" + q
+			users, err := entityList("User", combo)
+			if err != nil {
+				return nil, err
 			}
-			body := fmt.Sprintf("%s%s && context.%s.containsAll([%s])", match, earlier, src, strings.Join(users, ", "))
+			body := fmt.Sprintf("%s%s && context.%s.containsAll([%s])", match, earlier, src, users)
 			emit("permit", body, PolicyMeta{Rule: rule.Name, Combo: append([]string{}, combo...)})
 		}
 		negs = append(negs, "!("+match+")")

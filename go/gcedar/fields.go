@@ -241,16 +241,12 @@ func CompileFields(p *FieldPolicy) (string, error) {
 			return "", err
 		}
 		for _, combo := range combos {
-			ks := make([]string, len(combo))
-			for i, k := range combo {
-				q, err := cedarStr(k)
-				if err != nil {
-					return "", err
-				}
-				ks[i] = "Key::" + q
+			ks, err := entityList("Key", combo)
+			if err != nil {
+				return "", err
 			}
 			fmt.Fprintf(&b, "permit(principal, action == Action::\"accept\", resource) when { resource.name == %s && resource.signers.containsAll([%s]) };\n",
-				fq, strings.Join(ks, ", "))
+				fq, ks)
 		}
 	}
 	if b.Len() == 0 {
