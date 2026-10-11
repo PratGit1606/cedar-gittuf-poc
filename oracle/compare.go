@@ -15,23 +15,6 @@ type Scenario struct {
 	Attestors []string
 }
 
-// Signers is what our Phase A would hand Cedar for this scenario: every policy
-// principal that produced a valid signature (RSL entry or attestation).
-func (s Scenario) Signers(doc *gcedar.Doc) []string {
-	m := map[string]bool{}
-	for _, n := range append([]string{s.Pusher}, s.Attestors...) {
-		if _, ok := doc.Principals[n]; ok {
-			m[n] = true
-		}
-	}
-	out := make([]string, 0, len(m))
-	for n := range m {
-		out = append(out, n)
-	}
-	sort.Strings(out)
-	return out
-}
-
 // keyName is the SSH key backing a doc principal: the principal's own name,
 // or "<name>" when the doc gives "key:<name>" (used to make principals share
 // a key).
@@ -193,27 +176,6 @@ func PushScenario(w *World, ref string, s Scenario) (bool, error, error) {
 	}
 	verr, err := w.Push(ref, pusher, att)
 	return verr == nil, verr, err
-}
-
-// CedarVerdict runs the same scenario through our compiler + cedar-go.
-func CedarVerdict(doc *gcedar.Doc, ref string, s Scenario) (bool, error) {
-	c, err := gcedar.Compile(doc)
-	if err != nil {
-		return false, err
-	}
-	ev, err := gcedar.NewEvaluator(doc, c)
-	if err != nil {
-		return false, err
-	}
-	pusher := s.Pusher
-	if pusher == "" {
-		pusher = "<unsigned>"
-	}
-	d := ev.Decide(gcedar.Facts{Ref: ref, Pusher: pusher, Author: pusher, Signers: s.Signers(doc)})
-	if len(d.Errors) > 0 {
-		return false, fmt.Errorf("cedar errors: %v", d.Errors)
-	}
-	return d.Allowed, nil
 }
 
 // isPolicyDenial distinguishes gittuf's "policy not met" from other failures
