@@ -1,64 +1,121 @@
-# Cedar x gittuf POC
+# Cedar × gittuf proof of concept
 
-A working Python tool that tests whether Cedar can be the authorization engine for gittuf-style delegations, following the architecture from today's discussion:
+[gittuf](https://github.com/gittuf/gittuf) adds security policy to Git: rules
+such as "two of these three maintainers must sign off before anything lands
+on `main`". Today gittuf evaluates those rules with its own Go code.
 
-1. Untrusted data is parsed and signatures are verified **on the host** (Cedar never verifies or hashes).
-2. The verified facts are fed to Cedar as request context / entity attributes.
-3. Cedar decides whether the policy is satisfied.
-4. Policies are compiled from simple JSON delegations (Lucas's suggestion: JSON for common cases, Cedar underneath).
+This repository tests whether **[Cedar](https://www.cedarpolicy.com/)**, a
+small policy language from AWS with an official Go implementation and a
+formal-analysis toolkit, could be gittuf's policy engine instead. The
+attraction: Cedar policies can be *proven* correct with an SMT solver, not
+just tested.
 
-## Run it
+## The idea in ten lines
 
-```
-pip install cedarpy cryptography
-python3 demo.py                              # end-to-end example
-python3 -m unittest discover -s tests -t .   # 24 tests, ~35 s
-python3 bench.py                             # threshold expansion cost
-```
+A gittuf-style policy (who must sign what) is written as JSON and compiled to Cedar.
+Checking a push then happens in two phases:
 
-## What is in it
+1. **Phase A, on the host (Go):** parse the untrusted input, verify every
+   signature, read forge data (approvals, who the author is). The output is a
+   few plain facts, e.g. "these principals validly signed".
+2. **Phase B, in Cedar:** given only those facts, decide allow or deny.
 
-| File | Purpose |
-|---|---|
-| `gcedar/compile.py` | JSON delegations to Cedar schema + policies. Expands k-of-n and nested roles into one `permit` per minimal approver set (Lucas's template suggestion). Refuses expansions over 200k candidates. |
-| `gcedar/verify.py` | Two-phase verifier. Phase A: ed25519 verification, forge review interpretation. Phase B: Cedar. Only verifies keys named by rules matching the ref. |
-| `gcedar/reference.py` | Independent pure-Python implementation of the same semantics, used as a test oracle. |
-| `gcedar/fields.py` | Justin's use case: "field X must be signed by a key in set Y", with per-field thresholds. |
-| `gcedar/analysis.py` | Bounded equivalence / subset / dead-policy checks by exhaustive evaluation (see caveats). |
-| `tests/` | Differential, signature, forge-data, analysis and field tests. |
+Cedar never sees a key or a signature, and never hashes anything. That keeps
+Cedar small and analyzable, but it means **Cedar trusts whatever Phase A
+tells it**.
 
 ## Results
 
-**Correctness.** 150 random delegation documents (nested roles, overlapping globs, thresholds, default allow/deny, approvals as a source, self-approval forbid) were evaluated by both Cedar and the reference verifier on every signer subset plus random mixed cases: 174,840 verdicts, 0 mismatches. Deliberately removing the first-match-wins clause from the compiler produces 2,384 mismatches on a smaller run, so the test does detect compiler bugs.
+* **Compiler vs reference:** on 150 random policy documents, the compiled
+  Cedar agrees with an independent Go reference implementation on all
+  **171,644** decisions.
+* **Compared with real gittuf:** a harness builds real gittuf repositories
+  with real SSH signatures and runs gittuf's own verifier. In *gittuf mode*
+  the compiler agrees with gittuf on **every** compared push: 0 disagreements
+  in 1,568 pushes over 300 random documents, plus targeted probes. (Documents
+  that list a member twice are rejected by us on purpose and are not compared;
+  see FINDINGS.md.)
+* **Two SMT proofs (cvc5):** (1) adding a broad rule such as
+  `refs/heads/* 1-of-{alice}` provably weakens a stricter rule on `main`;
+  (2) with the self-approval ban, no request where the author approved their
+  own change is ever allowed. Both have controls that make the solver produce
+  counterexamples.
+* **Capability matrix:** 12 capabilities (thresholds, globs, forbid rules,
+  time windows, field signing, …), each with a test, compared with what gittuf
+  and GitHub can express today.
+* **Findings:** in gittuf every matching rule is an alternative, so a broad
+  rule always weakens a narrow one; gittuf accepts a rule that lists a member
+  twice and then locks the branch forever (reproducer in `repro/`); and a
+  shared-key bug in the original Phase A.
 
-**Threshold expansion cost** (`bench.py`; one rule, one ref):
+Details: [FINDINGS.md](FINDINGS.md) · [CAPABILITIES.md](CAPABILITIES.md) · [PROOFS.md](PROOFS.md)
 
-| Config | Permit rules | Cedar size | Per request |
-|---|---:|---:|---:|
-| flat 2-of-3 | 3 | 0.5 KB | 0.14 ms |
-| flat 5-of-10 | 252 | 48 KB | 1.3 ms |
-| flat 5-of-15 | 3,003 | 577 KB | 13 ms |
-| flat 8-of-16 | 12,870 | 2.9 MB | 84 ms |
-| 3-of-5 roles, each 3-of-5 | 10,000 | 2.5 MB | 70 ms |
-| 3-of-5 roles, each 4-of-8 | 3.4M candidates | refused | n/a |
+## Try it
 
-Flat expansion is exactly C(n,k). Per-request time grows roughly linearly with the number of permit rules (about 6.5 µs each). Typical gittuf thresholds (2-of-3, 2-of-5) are tiny; large groups with nested thresholds are not viable this way.
+Requirements: Go 1.27+, git, ssh-keygen. For the proofs, also Rust ≥ 1.89,
+curl and unzip.
 
-## Findings that matter for the design doc
+```sh
+# 1. Compiler, Phase A/B, field signing, capability tests (no network needed)
+cd go && go test ./...
 
-1. **Expansion keeps thresholds visible to analysis and is exact**, unlike an `@threshold` annotation, but it is combinatorial. A practical cutoff is a few thousand rules; beyond that the fallback is counting outside Cedar, which hides the threshold from analysis.
-2. **Cedar cannot filter or count over sets of records.** Fresh-vs-stale and dismissed review logic therefore lives in Phase A (`fresh_approvals`), and Cedar only sees a pre-filtered `approvals` set. Anything the host computes is outside what Cedar analysis can reason about. I tested stale approvals, dismissals, re-approval after dismissal, and a later "changes requested" review. I did not test CI check states or admin-bypass events.
-3. **Self-approval is a `forbid`, which is stricter than gittuf's likely "ignore the author's approval".** Cedar can only deny the whole request when the author is in the approvals set. Excluding the author from the count would also have to happen in Phase A.
-4. **First-match-wins rule ordering costs a negated clause for every earlier pattern** in each permit, so policy size grows with rule count squared. Rules stop being independent, which hurts the TUF-style "each delegator writes their own part" goal.
-5. **Default-allow is an explicit catch-all permit** (`!(pattern1) && !(pattern2) ...`). It shows up in analysis like any other policy, which is a feature.
-6. **Cedar reports which policies fired**, including `forbid` policies on denials, so the verifier can say exactly why something was allowed or denied.
-7. **Signed fields work with default deny for free**: unknown fields are rejected, a signature copied from another field fails (the name is part of the signed bytes), and a changed value fails.
+# 2. See it work: compile a policy, verify some signed pushes
+go run ./cmd/gcedar demo
+go run ./cmd/gcedar compile -mode gittuf ../smt/docs/p1_broad.json   # print compiled Cedar
 
-## Caveats
+# 3. Compare against real gittuf (clones gittuf at a pinned commit, ~2 s)
+cd .. && oracle/setup.sh
+cd oracle && go test ./...                 # ~2 min; ORACLE_DOCS=300 for the big random run
 
-- **The analysis is not Cedar's SMT analysis.** `cedarpy` does not expose it. `analysis.py` enumerates every subset of principals over sampled refs, which is exhaustive for signer sets but only as good as the sampled refs. Real equivalence and subset proofs need Cedar's Rust analysis tooling, so that is a next step.
-- **Delegation semantics are simplified, not gittuf's.** No terminating or propagating rules, no multi-role precedence, no real gittuf metadata, and the signed payload (`gittuf-rsl\nref\ncommit`) is my own, not gittuf's RSL entry encoding. This POC does not interoperate with a real gittuf repository.
-- **Glob semantics are assumed:** `*` is the only wildcard and matches across `/`, which is how Cedar's `like` works. gittuf's actual pattern matching should be checked against this.
-- **Lazy verification here is a prefilter** (only keys named by matching rules). The real mechanism Lucas described is typed partial evaluation, which would derive that from residual policies. `cedarpy` exposes `is_authorized_partial`, which I did not use.
-- Forge data is trusted as given. Whether to trust it is the forge-trust question Patrick raised.
-- Cedar here is the Rust engine via `cedarpy`, so the Go-port gap (no partial evaluation, no analysis) is not exercised.
+# 4. The SMT proofs (downloads cvc5 1.2.1 on first run)
+cd .. && smt/run.sh                        # set CARGO=/path/to/cargo if your Rust is older than 1.89
+```
+
+`oracle/setup.sh` puts the gittuf checkout in `.gittuf-oracle/` (gitignored).
+Set `GITTUF=/some/dir` to put it elsewhere. If you run the oracle tests
+before `setup.sh`, Go stops with `replacement directory ../.gittuf-oracle does
+not exist`, which means: run `oracle/setup.sh` first.
+
+## Repository layout
+
+| Path | What it is |
+|---|---|
+| `go/gcedar/` | The library: JSON → Cedar compiler (strict and gittuf modes), Phase A verifier, Phase B evaluator (cedar-go), signed fields |
+| `go/cmd/gcedar/` | CLI: `gcedar compile [-mode strict\|gittuf] [-out dir] doc.json`, `gcedar demo` |
+| `oracle/` | Harness that runs real gittuf and compares its verdicts with ours; `setup.sh` pins the gittuf checkout |
+| `smt/` | Rust crate with the two SMT proofs (`cedar-policy-symcc` + cvc5); `run.sh` runs them end to end |
+| `repro/` | Stand-alone shell reproducer for the gittuf duplicate-member lockout |
+| `FINDINGS.md` | Everything the comparison with gittuf turned up, with reproducers |
+| `CAPABILITIES.md` | What gittuf, GitHub and Cedar can each express, one test per row |
+| `PROOFS.md` | What the SMT proofs show, their controls and their assumptions |
+
+**Compile modes.** *Strict* mode is the original design: the first matching
+rule decides, with an optional default deny, roles and approvals. *Gittuf*
+mode copies gittuf's real behaviour: any matching rule may allow, unprotected
+refs are allowed, and keys count once. The oracle checks gittuf mode.
+
+## Known limits
+
+* **Host facts are trusted.** Cedar decides only from what Phase A reports.
+  Neither the tests nor the proofs check signature verification, key handling
+  or forge data inside Cedar; they rely on the Go Phase A being right.
+* **Proofs cover the compiled policies, not the compiler.** Each proof is
+  about the Cedar produced for the specific documents in `smt/docs/`. That the
+  compiler is correct in general is tested (differential tests, gittuf
+  oracle), not proven.
+* **Some patterns cannot be expressed in Cedar.** gittuf patterns with `?` or
+  `[!…]` have no Cedar `like` equivalent, so the host matches them and passes
+  the result in. The solver treats that input as arbitrary.
+* **Threshold expansion grows fast.** k-of-n becomes C(n,k) Cedar policies.
+  8-of-16 is 12,870 policies (~16 ms per decision); expansions above 200,000
+  candidates are refused.
+* **gittuf coverage is partial.** The comparison covers ref rules with SSH keys
+  and reference authorizations. It does not cover GitHub app approvals, file
+  rules, tags, or full-history verification (list in FINDINGS.md).
+
+## History
+
+The project started as a Python prototype. Its behaviour was ported to Go and
+checked byte for byte against it, and then the prototype was retired; it is
+archived outside this repository. The Go code is now the reference
+implementation.
