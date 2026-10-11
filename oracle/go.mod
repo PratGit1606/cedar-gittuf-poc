@@ -193,6 +193,6 @@ require (
 )
 
 replace (
-	github.com/gittuf/gittuf => ../../gittuf
+	github.com/gittuf/gittuf => ../.gittuf-oracle // created by oracle/setup.sh
 	github.com/pratham/gcedar => ../go
 )

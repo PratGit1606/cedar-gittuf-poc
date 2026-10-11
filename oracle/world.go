@@ -297,7 +297,42 @@ var (
 	binErr  error
 )
 
-// gittufBin builds the gittuf CLI from the sibling clone (once per process).
+// GittufSHA is the gittuf commit the oracle is pinned to (see setup.sh).
+const GittufSHA = "0b0278ec1d484e59d2107c38f38c059908a33856"
+
+// GittufDir is the gittuf checkout: $GITTUF, else <repo>/.gittuf-oracle. The
+// Go API is compiled from <repo>/.gittuf-oracle (go.mod replace), which
+// setup.sh links to $GITTUF when that is set.
+func GittufDir() string {
+	if d := os.Getenv("GITTUF"); d != "" {
+		return d
+	}
+	d, _ := filepath.Abs("../.gittuf-oracle")
+	return d
+}
+
+// CheckGittufDir explains, in terms of setup.sh, why the checkout is unusable.
+func CheckGittufDir() error {
+	dir := GittufDir()
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
+	if err != nil {
+		return fmt.Errorf("no gittuf checkout at %s; run oracle/setup.sh (set $GITTUF to use another directory)", dir)
+	}
+	if head := strings.TrimSpace(string(out)); head != GittufSHA {
+		return fmt.Errorf("gittuf checkout %s is at %s, expected %s; run oracle/setup.sh", dir, head, GittufSHA)
+	}
+	if os.Getenv("GITTUF") == "" {
+		return nil
+	}
+	compiled, _ := filepath.Abs("../.gittuf-oracle")
+	compiled, _ = filepath.EvalSymlinks(compiled)
+	if real, _ := filepath.EvalSymlinks(dir); real != compiled {
+		return fmt.Errorf("$GITTUF=%s but the oracle compiles against <repo>/.gittuf-oracle (%s); run GITTUF=%s oracle/setup.sh to link it", dir, compiled, dir)
+	}
+	return nil
+}
+
+// gittufBin builds the gittuf CLI from the checkout (once per process).
 func gittufBin() (string, error) {
 	binOnce.Do(func() {
 		d, err := os.MkdirTemp("", "oracle-bin-")
@@ -306,9 +341,8 @@ func gittufBin() (string, error) {
 			return
 		}
 		binPath = filepath.Join(d, "gittuf")
-		src, _ := filepath.Abs("../../gittuf")
 		cmd := exec.Command("go", "build", "-o", binPath, ".")
-		cmd.Dir = src
+		cmd.Dir = GittufDir()
 		if out, err := cmd.CombinedOutput(); err != nil {
 			binErr = fmt.Errorf("build gittuf: %v: %s", err, out)
 		}
