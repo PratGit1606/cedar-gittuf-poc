@@ -17,4 +17,8 @@ done
 export CVC5=${CVC5:-$("$here/fetch-cvc5.sh")}
 "$CVC5" --version | head -1
 cd "$here"
+# cargo runs the rustc on PATH; with CARGO set, use the rustc next to it.
+if [ -n "${CARGO:-}" ] && [ -x "$(dirname "$CARGO")/rustc" ]; then
+  export RUSTC=${RUSTC:-$(dirname "$CARGO")/rustc}
+fi
 "${CARGO:-cargo}" run --quiet --release -- "$out"
