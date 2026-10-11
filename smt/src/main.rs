@@ -40,8 +40,8 @@ enum Kind {
 struct Query {
     title: &'static str,
     kind: Kind,
-    a: String, // compiled policy dir name, or literal policy text if it starts with "permit"/"forbid"
-    b: String,
+    a: &'static str, // compiled policy dir name
+    b: &'static str, // compiled policy dir name, or literal policy text starting with "permit"/"forbid"
     scope_main: bool,
     expect: Expect,
 }
@@ -61,11 +61,11 @@ fn decide(ps: &PolicySet, cex: &Env) -> Decision {
 async fn main() -> ExitCode {
     let out = env::args().nth(1).expect("usage: gcedar-smt <compiled-dir>");
     let out = Path::new(&out);
-    let q = |title, kind, a: &str, b: &str, scope_main, expect| Query {
+    let q = |title, kind, a, b, scope_main, expect| Query {
         title,
         kind,
-        a: a.to_string(),
-        b: b.to_string(),
+        a,
+        b,
         scope_main,
         expect,
     };
@@ -103,11 +103,11 @@ async fn main() -> ExitCode {
         .expect("solver");
     let mut failures = 0;
     for qu in &queries {
-        let (pa, schema_text) = load(out, &qu.a);
+        let (pa, schema_text) = load(out, qu.a);
         let pb = if qu.b.starts_with("permit") || qu.b.starts_with("forbid") {
-            qu.b.clone()
+            qu.b.to_string()
         } else {
-            let (p, s) = load(out, &qu.b);
+            let (p, s) = load(out, qu.b);
             assert_eq!(s, schema_text, "{}: both sides must share a schema", qu.title);
             p
         };
