@@ -53,8 +53,8 @@ func TestProbeDuplicateMembers(t *testing.T) {
 }
 
 // Finding 5: two principals (tufv02 persons p1, p2) that share one key.
-// Strict mode credits every principal whose key signed, as the Python Phase A
-// did; gittuf mode identifies principals by key ID. Logged, not asserted.
+// Strict mode credits every principal whose key signed, as the archived
+// prototype's Phase A did; gittuf mode identifies principals by key ID. Logged, not asserted.
 func TestProbeSharedKey(t *testing.T) {
 	ps := map[string]string{"p1": "key:shared", "p2": "key:shared", "p3": "key:carol"}
 	for _, members := range [][]string{{"p1", "p2"}, {"p1", "p2", "p3"}} {

@@ -11,7 +11,7 @@ if [ ! -x "$bin" ]; then
   zip="$dir/cvc5.zip"
   curl -fsSL -o "$zip" "https://github.com/cvc5/cvc5/releases/download/cvc5-$VERSION/cvc5-Linux-x86_64-static.zip"
   echo "sha256 $(sha256sum "$zip" | cut -d' ' -f1)  cvc5-$VERSION Linux-x86_64-static.zip" >&2
-  python3 -I -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' "$zip" "$dir/unzipped"
+  unzip -q "$zip" -d "$dir/unzipped"
   mkdir -p "$dir/bin"
   cp "$(find "$dir/unzipped" -type f -path '*/bin/cvc5' | head -1)" "$bin"
   chmod +x "$bin"
