@@ -3,7 +3,10 @@
 # of DISTINCT principals when a principal is listed twice, and that rule can
 # then never be satisfied (the protected namespace is locked).
 #
-# Requires: gittuf on PATH (or GITTUF=/path/to/gittuf), git >= 2.34, ssh-keygen.
+# Requires: git >= 2.34, ssh-keygen, and either
+#   - the pinned gittuf checkout from oracle/setup.sh (default
+#     <repo>/.gittuf-oracle, or $GITTUF); the CLI is built from it with Go, or
+#   - GITTUF_BIN=/path/to/gittuf, a prebuilt gittuf CLI (standalone use).
 # Tested against gittuf 0b0278ec1d484e59d2107c38f38c059908a33856.
 #
 # Cause (at that commit): internal/tuf/v02/targets.go AddRule checks
@@ -11,7 +14,16 @@
 # on the list as given, then stores set.NewSetFromItems(authorizedPrincipalIDs...),
 # which deduplicates. Verification counts distinct principals.
 set -euo pipefail
-GITTUF=${GITTUF:-gittuf}
+SHA=0b0278ec1d484e59d2107c38f38c059908a33856
+if [ -z "${GITTUF_BIN:-}" ]; then
+  src=${GITTUF:-$(cd "$(dirname "$0")/.." && pwd)/.gittuf-oracle}
+  head=$(git -C "$src" rev-parse HEAD 2>/dev/null) || {
+    echo "no gittuf checkout at $src; run oracle/setup.sh (or set GITTUF_BIN to a gittuf binary)" >&2; exit 1; }
+  [ "$head" = "$SHA" ] || { echo "$src is at $head, expected $SHA; run oracle/setup.sh" >&2; exit 1; }
+  GITTUF_BIN=$(mktemp -d)/gittuf
+  (cd "$src" && go build -o "$GITTUF_BIN" .)
+fi
+GITTUF=$GITTUF_BIN
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 
 work=$(mktemp -d)

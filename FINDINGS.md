@@ -233,8 +233,8 @@ standalone CLI script `repro/gittuf-duplicate-members-lockout.sh`.
   Error: verifying Git namespace policies failed, gittuf policy verification failed
   RESULT: verification failed: the rule stored as 2-of-{alice} can never be met; main is locked
   ```
-  Script usage: `GITTUF=/path/to/gittuf repro/gittuf-duplicate-members-lockout.sh`.
-  It uses only the CLI, `git` and `ssh-keygen`.
+  Script usage: run `oracle/setup.sh`, then `repro/gittuf-duplicate-members-lockout.sh` (builds gittuf from the pinned checkout), or `GITTUF_BIN=/path/to/gittuf repro/gittuf-duplicate-members-lockout.sh` with any gittuf CLI.
+  It needs only `git`, `ssh-keygen`, and either Go (to build gittuf from the checkout) or a gittuf CLI.
 * **(a) Our model was wrong in strict mode:** it counted a duplicated member once
   per listing, which quietly lowers the threshold.
 * **Resolution (Go change 1):** the Go compiler now **rejects** a member
