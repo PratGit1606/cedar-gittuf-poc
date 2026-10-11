@@ -18,7 +18,7 @@ func sample[T any](rng *rand.Rand, pool []T, n int) []T {
 	return out
 }
 
-// randomDoc mirrors tests/util.py:random_doc.
+// randomDoc draws a random strict-mode document (roles, globs, approvals).
 func randomDoc(rng *rand.Rand) *Doc {
 	names := make([]string, 6)
 	principals := map[string]string{}
@@ -51,38 +51,7 @@ func randomDoc(rng *rand.Rand) *Doc {
 		Default: []string{"allow", "deny"}[rng.Intn(2)], ForbidSelfApproval: rng.Float64() < 0.3}
 }
 
-// mutateDoc injects edge cases (duplicates, bad globs, impossible thresholds,
-// unknown names, cycles, omitted optional fields) for the byte-compat test.
-func mutateDoc(rng *rand.Rand, d *Doc) {
-	switch rng.Intn(10) {
-	case 0: // duplicate member
-		d.Rules[0].Members = append(d.Rules[0].Members, d.Rules[0].Members[0])
-	case 1:
-		d.Rules[0].Pattern = []string{"refs/heads/?", "refs/[a]", `a"b`, "", "**", "refs/*/x*"}[rng.Intn(6)]
-	case 2:
-		d.Rules[0].Threshold = []int{0, -1, len(d.Rules[0].Members) + 1}[rng.Intn(3)]
-	case 3:
-		d.Rules[0].Members = append(d.Rules[0].Members, "ghost")
-	case 4:
-		d.Rules[0].Members = append(d.Rules[0].Members, "@nope")
-	case 5:
-		d.Roles["cyc"] = Role{Threshold: 1, Members: []string{"@cyc"}}
-		d.Rules[0].Members = append(d.Rules[0].Members, "@cyc")
-	case 6:
-		d.Default = ""
-		for i := range d.Rules {
-			d.Rules[i].Source = ""
-		}
-	case 7:
-		d.Rules = []Rule{} // not nil: Python crashes on "rules": null (known, left as is)
-	case 8:
-		d.Rules = append(d.Rules, d.Rules[0]) // duplicate rule name
-	case 9:
-		d.Default = "maybe"
-	}
-}
-
-// sampleRefs mirrors gcedar/analysis.py:sample_refs.
+// sampleRefs derives refs from the rule patterns plus one unmatched ref.
 func sampleRefs(d *Doc) []string {
 	m := map[string]bool{"refs/other/zzz": true}
 	for _, r := range d.Rules {

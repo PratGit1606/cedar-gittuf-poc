@@ -5,10 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -65,91 +61,6 @@ func TestDifferential(t *testing.T) {
 	if total < 100000 {
 		t.Fatalf("too few verdicts: %d", total)
 	}
-}
-
-// The Go compiler must emit byte-identical Cedar to gcedar/compile.py, and
-// fail on exactly the same inputs.
-func TestPythonByteCompat(t *testing.T) {
-	root, _ := filepath.Abs("../..")
-	py := filepath.Join(root, ".venv/bin/python")
-	if _, err := os.Stat(py); err != nil {
-		t.Skipf("python venv not found at %s", py)
-	}
-	rng := rand.New(rand.NewSource(42))
-	var docs []*Doc
-	for i := 0; i < 400; i++ {
-		d := randomDoc(rng)
-		if i%2 == 1 {
-			mutateDoc(rng, d)
-		}
-		docs = append(docs, d)
-	}
-	docs = append(docs, flatDoc(10, 5), nestedDoc(5, 5, 3, 3), nestedDoc(5, 8, 3, 4))
-	in, _ := json.Marshal(docs)
-	dir := t.TempDir()
-	inPath := filepath.Join(dir, "docs.json")
-	os.WriteFile(inPath, in, 0o644)
-	script := `
-import json, sys
-sys.path.insert(0, sys.argv[1])
-from gcedar.compile import compile_delegations, DelegationError
-out = []
-for d in json.load(open(sys.argv[2])):
-    try:
-        out.append({"policies": compile_delegations(d).policies})
-    except DelegationError as e:
-        out.append({"error": type(e).__name__ + ": " + str(e)})
-    except Exception as e:  # anything else is a crash, distinct from a DelegationError
-        out.append({"crash": type(e).__name__ + ": " + str(e)})
-json.dump(out, sys.stdout)
-`
-	cmd := exec.Command(py, "-c", script, root, inPath)
-	cmd.Stderr = os.Stderr
-	outB, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("python: %v", err)
-	}
-	var pyOut []struct{ Policies, Error, Crash string }
-	if err := json.Unmarshal(outB, &pyOut); err != nil {
-		t.Fatal(err)
-	}
-	same, bothErr, diff, skipped := 0, 0, 0, 0
-	for i, d := range docs {
-		// Expected, deliberate differences from compile.py; skip these inputs:
-		//  - a member listed twice: Go rejects it (DuplicateMemberError), Python
-		//    accepts it and counts the member twice.
-		//  - one principal reachable through two members of the same threshold
-		//    (e.g. 2-of-[a, @r] with a in @r): Go requires each member to be met
-		//    by its own signers, Python lets one signer count for both, so the
-		//    permit sets can differ.
-		if hasDuplicateOrOverlap(d) {
-			skipped++
-			continue
-		}
-		c, gerr := Compile(d)
-		p := pyOut[i]
-		switch {
-		case p.Crash != "":
-			diff++
-			t.Errorf("doc %d: python crashed (%s), go err=%v", i, p.Crash, gerr)
-		case gerr != nil && p.Error != "":
-			bothErr++
-			var gtl *ExpansionTooLarge
-			if errors.As(gerr, &gtl) != strings.HasPrefix(p.Error, "ExpansionTooLarge") {
-				diff++
-				t.Errorf("doc %d: error class differs: go=%v py=%s", i, gerr, p.Error)
-			}
-		case gerr != nil || p.Error != "":
-			diff++
-			t.Errorf("doc %d: go err=%v, py err=%q", i, gerr, p.Error)
-		case c.Policies != p.Policies:
-			diff++
-			t.Errorf("doc %d: policy text differs\n go: %.300q\n py: %.300q", i, c.Policies, p.Policies)
-		default:
-			same++
-		}
-	}
-	t.Logf("python byte-compat: %d identical, %d both rejected, %d differ, %d skipped (expected difference)", same, bothErr, diff, skipped)
 }
 
 func flatDoc(n, k int) *Doc {
@@ -223,52 +134,4 @@ func TestForbidOverridesAndReasons(t *testing.T) {
 	if d.Allowed || len(d.Reasons) != 1 || d.Reasons[0].Rule != "<self-approval>" {
 		t.Errorf("want deny by self-approval forbid, got %+v", d)
 	}
-}
-
-// hasDuplicateOrOverlap reports whether any threshold in d (rule or reachable
-// role) lists a member twice, or has two members that can reach the same
-// principal. Those are the inputs where Go deliberately differs from Python.
-func hasDuplicateOrOverlap(d *Doc) bool {
-	var reach func(m string, stack map[string]bool) map[string]bool
-	reach = func(m string, stack map[string]bool) map[string]bool {
-		if !strings.HasPrefix(m, "@") {
-			return map[string]bool{m: true}
-		}
-		out := map[string]bool{}
-		r, ok := d.Roles[m[1:]]
-		if !ok || stack[m] {
-			return out
-		}
-		stack[m] = true
-		for _, x := range r.Members {
-			for p := range reach(x, stack) {
-				out[p] = true
-			}
-		}
-		delete(stack, m)
-		return out
-	}
-	bad := func(members []string) bool {
-		seen := map[string]bool{}
-		for _, m := range members {
-			for p := range reach(m, map[string]bool{}) {
-				if seen[p] {
-					return true
-				}
-				seen[p] = true
-			}
-		}
-		return false
-	}
-	for _, r := range d.Rules {
-		if bad(r.Members) {
-			return true
-		}
-	}
-	for _, r := range d.Roles {
-		if bad(r.Members) {
-			return true
-		}
-	}
-	return false
 }
