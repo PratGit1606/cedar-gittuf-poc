@@ -29,21 +29,22 @@ func (w world) sign(who, ref, commit string) string {
 }
 
 var (
-	vw              = makeWorld("alice", "bob", "carol", "dave", "erin")
-	vREF, vC1, vC2  = "refs/heads/main", strings.Repeat("c", 40), strings.Repeat("d", 40)
-	verifierTestDoc = func() *Doc {
-		return &Doc{
-			Principals: vw.pk,
-			Roles:      map[string]Role{"release": {Threshold: 1, Members: []string{"dave", "erin"}}},
-			Rules: []Rule{
-				{Name: "main", Pattern: "refs/heads/main", Threshold: 2, Members: []string{"alice", "bob", "@release"}},
-				{Name: "reviewed", Pattern: "refs/heads/feature/*", Threshold: 2, Members: []string{"alice", "bob", "carol"}, Source: "approvals"},
-			},
-			Default:            "deny",
-			ForbidSelfApproval: true,
-		}
-	}
+	vw             = makeWorld("alice", "bob", "carol", "dave", "erin")
+	vREF, vC1, vC2 = "refs/heads/main", strings.Repeat("c", 40), strings.Repeat("d", 40)
 )
+
+func verifierTestDoc() *Doc {
+	return &Doc{
+		Principals: vw.pk,
+		Roles:      map[string]Role{"release": {Threshold: 1, Members: []string{"dave", "erin"}}},
+		Rules: []Rule{
+			{Name: "main", Pattern: "refs/heads/main", Threshold: 2, Members: []string{"alice", "bob", "@release"}},
+			{Name: "reviewed", Pattern: "refs/heads/feature/*", Threshold: 2, Members: []string{"alice", "bob", "carol"}, Source: "approvals"},
+		},
+		Default:            "deny",
+		ForbidSelfApproval: true,
+	}
+}
 
 func newTestVerifier(t *testing.T) *Verifier {
 	t.Helper()

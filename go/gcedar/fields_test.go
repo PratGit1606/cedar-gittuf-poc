@@ -174,7 +174,7 @@ for v in json.loads(sys.argv[2]):
 	}
 	want := strings.Fields(string(out))
 	for i, v := range vs {
-		got, err := Canonical("f", toPlain(v))
+		got, err := Canonical("f", v)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -183,25 +183,6 @@ for v in json.loads(sys.argv[2]):
 			t.Errorf("value %d: go %s, python %s", i, got, w)
 		}
 	}
-}
-
-// toPlain keeps json.Number (so ints stay ints) and converts containers.
-func toPlain(v any) any {
-	switch x := v.(type) {
-	case []any:
-		out := make([]any, len(x))
-		for i, e := range x {
-			out[i] = toPlain(e)
-		}
-		return out
-	case map[string]any:
-		out := map[string]any{}
-		for k, e := range x {
-			out[k] = toPlain(e)
-		}
-		return out
-	}
-	return v
 }
 
 // CompileFields emits the same Cedar text as fields.py:compile_fields.

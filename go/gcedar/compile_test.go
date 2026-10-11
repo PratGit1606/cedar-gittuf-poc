@@ -3,6 +3,7 @@ package gcedar
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -169,25 +170,18 @@ func nestedDoc(groups, per, outerK, innerK int) *Doc {
 	for g := 0; g < groups; g++ {
 		var ms []string
 		for i := 0; i < per; i++ {
-			name := "g" + string(rune('0'+g)) + "p" + string(rune('0'+i))
+			name := fmt.Sprintf("g%dp%d", g, i)
 			d.Principals[name] = ""
 			ms = append(ms, name)
 		}
-		d.Roles["g"+string(rune('0'+g))] = Role{Threshold: innerK, Members: ms}
-		outer = append(outer, "@g"+string(rune('0'+g)))
+		d.Roles[fmt.Sprintf("g%d", g)] = Role{Threshold: innerK, Members: ms}
+		outer = append(outer, fmt.Sprintf("@g%d", g))
 	}
 	d.Rules = []Rule{{Name: "r", Pattern: "refs/heads/main", Threshold: outerK, Members: outer}}
 	return d
 }
 
 func TestExpansionSizes(t *testing.T) {
-	binom := func(n, k int) int {
-		r := 1
-		for i := 1; i <= k; i++ {
-			r = r * (n - k + i) / i
-		}
-		return r
-	}
 	for _, nk := range [][2]int{{3, 2}, {5, 3}, {10, 5}, {16, 8}} {
 		c, err := Compile(flatDoc(nk[0], nk[1]))
 		if err != nil {

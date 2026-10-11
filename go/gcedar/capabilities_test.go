@@ -3,6 +3,7 @@ package gcedar
 import (
 	"fmt"
 	"math/rand"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -287,7 +288,8 @@ func TestCapExplainableDecisions(t *testing.T) {
 	for _, r := range d.Reasons {
 		got = append(got, r.Rule+":"+strings.Join(r.Combo, "+"))
 	}
-	if !d.Allowed || strings.Join(got, ",") != "two:a+b,c-alone:c" && strings.Join(got, ",") != "c-alone:c,two:a+b" {
+	sort.Strings(got)
+	if !d.Allowed || strings.Join(got, ",") != "c-alone:c,two:a+b" {
 		t.Errorf("reasons = %v", got)
 	}
 	if d := ev.Decide(Facts{Ref: "refs/heads/main", Signers: []string{"a"}}); d.Allowed || len(d.Reasons) != 0 {
