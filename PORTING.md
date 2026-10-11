@@ -29,7 +29,7 @@ ported: the SMT proofs (Step 4) replace it.
 | `Verifier.__init__` | compile + validate | `NewVerifier` | ported (+ refuses shared public keys) |
 | `Verifier.candidates` | lazy-verification prefilter | `Verifier.Candidates` | ported |
 | `Verifier.phase_a` | signatures + forge data | `Verifier.PhaseA` | ported |
-| `Verifier.entities`, `.request` | Cedar inputs | `Evaluator.Entities`, `Request` | ported |
+| `Verifier.entities`, `.request` | Cedar inputs | `Evaluator.Entities`, `RequestMode` | ported |
 | `Verifier.phase_b` | Cedar decision | `Evaluator.Decide` | ported |
 | `Verifier.check` | both phases | `Verifier.Check` | ported |
 | `Verifier.check_batch` | many requests, one ref | `Evaluator.DecideWith` (shared entity map) | ported |
