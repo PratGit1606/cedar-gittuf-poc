@@ -153,8 +153,9 @@ carol authored the change and her own approval made up the 2-of-3.
   impossible in reality: a pattern reported as matching a ref it does not match.
 * **Specific policies, not the compiler.** Each proof is about the compiled
   output of the documents in `smt/docs/`, not about "all documents". That the
-  compiler is correct is tested, not proven: differential tests, Python
-  byte-compat, and the gittuf oracle (0 disagreements in gittuf mode).
+  compiler is correct is tested, not proven: differential tests, the gittuf
+  oracle (0 disagreements in gittuf mode), and, while the prototype existed,
+  byte-for-byte comparison with it.
 * **gittuf mode, not gittuf.** Proof 1 is about the gittuf-mode Cedar
   policies. It transfers to gittuf itself only as far as the oracle comparison
   goes (FINDINGS.md); it is not a proof about gittuf's Go code.

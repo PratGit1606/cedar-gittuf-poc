@@ -1,5 +1,13 @@
 # Findings: Cedar compiler vs real gittuf
 
+> **About "Python" below.** This POC began as a Python prototype
+> (`gcedar/compile.py`, `verify.py`, `fields.py`, …). Its behaviour was
+> ported to Go and checked byte for byte against it, and the prototype was
+> then retired. It is archived outside this repository. Mentions of Python
+> files, the Python Phase A, or tests such as `TestPythonByteCompat` below are
+> history: those files and tests no longer exist here, and the Go code is the
+> reference implementation.
+
 ## Oracle under test
 
 | | |
@@ -38,8 +46,9 @@ run, `ORACLE_DEBUG=1` for gittuf's own trace).
 
 ## Two compile modes
 
-`go/gcedar` now has two modes (`CompileMode`). Strict mode is unchanged and
-still byte-identical to `compile.py`.
+`go/gcedar` now has two modes (`CompileMode`). Strict mode is the original
+semantics; it was byte-identical to the prototype's `compile.py` except for
+the deliberate differences recorded under "Go change 1" below.
 
 | | `strict` (the original POC) | `gittuf` (mirrors the commit above) |
 |---|---|---|
@@ -248,7 +257,7 @@ tufv02 persons with the same SSH key; p3 (carol) has her own key.
 | 2-of-[p1, p2, p3] | shared key + carol | allow | allow | allow |
 | 2-of-[p1, p2] | RSL entry by the shared key | deny | **allow** | deny |
 
-The real Python Phase A (`gcedar/verify.py`), run with p1 and p2 sharing a key:
+The prototype's Python Phase A (`gcedar/verify.py`, now archived), run with p1 and p2 sharing a key:
 ```
 one signature, filed under p1 only       signers=['p1'] allowed=False
 same signature filed under p1 and p2     signers=['p1', 'p2'] allowed=True
@@ -316,7 +325,7 @@ semantics.
 
 ## Minor
 
-* `compile.py` crashes on `"rules": null` (`TypeError`). Left as is.
+* The prototype's `compile.py` crashed on `"rules": null` (`TypeError`). It was never fixed; the prototype is archived. The Go compiler treats it as no rules.
 * `TestRandomAgainstGittuf` takes about 30 s for 40 documents and about 4 min for
   300 (4 in parallel). One gittuf world takes about 0.3 to 1 s, or about 3 s
   with CLI-created persons.
@@ -330,7 +339,7 @@ semantics.
 | 2b | `[ab]` patterns | (a) model too narrow | bounded `like` OR in gittuf mode |
 | 3 | Default deny | (a) model | gittuf mode rejects it; use a catch-all rule |
 | 4 | Duplicate members | (a) model + (c) gittuf lockout bug | gittuf mode matches; CLI reproducer written; strict mode not fixed (as instructed) |
-| 5 | Shared keys | (d) our Phase A bug + (c) gittuf quirk | gittuf mode uses key IDs as identities; Python Phase A not fixed (as instructed) |
+| 5 | Shared keys | (d) our Phase A bug + (c) gittuf quirk | gittuf mode uses key IDs as identities; the Go Phase A refuses shared keys (Go change 1); the prototype's Phase A was never fixed (archived) |
 | 6 | Commit vs RSL signature | agreement | — |
 | 7 | Roles vs delegated rule files | different features (roles are expressible in gittuf by expansion) | CAPABILITIES.md; not forced |
 
@@ -366,10 +375,11 @@ code closes it:
 | Two principal names bound to one public key (one signature filed under both names) | Python Phase A: counted twice (Finding 5) | strict: the Go Phase A verifier refuses the document (hex is normalised, so `AB..` = `ab..`); gittuf mode: key ID is the identity | `TestSharedKeyRejected` (verify_test.go), `TestGittufModeSharedKeyCountsOnce` |
 | Field spec listing a key twice; two field keys with the same public key | Python: counted twice | compile error; field verifier refuses the document | fields_test.go |
 
-The overlapping-roles row changes strict-mode meaning compared with
-`compile.py`. `TestPythonByteCompat` therefore skips inputs with a duplicate
-member or an overlap, and says why in a comment. On its 403 inputs: 114
-identical, 62 rejected by both, 0 differ, 227 skipped.
+The overlapping-roles row changes strict-mode meaning compared with the
+prototype's `compile.py`. While the prototype existed, `TestPythonByteCompat`
+skipped inputs with a duplicate member or an overlap; on its 403 inputs it
+reported 114 identical, 62 rejected by both, 0 different, 227 skipped. That
+test was removed together with the prototype.
 
 ## Notes recorded after the Python-to-Go port
 
@@ -380,8 +390,8 @@ with alice in both roles, or 2-of-[alice, @r] with alice in @r, now need two
 different signers. `compile.py` and `reference.py` let alice satisfy both.
 With the rule removed from `ExpandThreshold`, the differential test
 (Cedar vs the search-based Go reference, 171,644 verdicts) reports **2,752
-mismatches**, so the rule is exercised. `TestPythonByteCompat` skips the
-affected inputs on purpose (227 of 403).
+mismatches**, so the rule is exercised. The byte-compat test against the
+prototype (since removed) skipped the affected inputs on purpose (227 of 403).
 
 **(b) The oracle pushes that are no longer compared.** In the 300-document
 oracle run, **832 of 2,400 gittuf-mode pushes are not compared**. All of them
@@ -393,21 +403,23 @@ one key-ID identity, as gittuf does. The remaining 1,568 gittuf-mode pushes
 show 0 disagreements. So the "0 disagreements" claim covers documents without
 duplicate members; for documents with them, we deliberately differ.
 
-**(c) Field-signature encoding limits.** `Canonical` reproduces Python's
-`json.dumps(..., sort_keys=True, separators=(",",":"))` byte for byte for
-strings (including non-ASCII, control characters and DEL), booleans, null,
-integers within int64, arrays, objects, and floats (`TestCanonicalMatchesPython`,
-13 values). I checked the cases from the original note against both implementations:
+**(c) Field-signature encoding: the Go encoding is the specification.**
+`Canonical` (`go/gcedar/fields.go`) defines the signed bytes of a field: the
+JSON array `[name, value]` with no whitespace, object keys sorted by code
+point, strings escaped to printable ASCII (`\uXXXX` for everything else),
+integers in decimal, and floats in shortest round-trip form (`1.0`, `1e+16`).
+**Known limit:** integers beyond 64 bits go through float64 and lose
+precision. `123456789012345678901234` encodes as `1.2345678901234569e+23`. A
+Go caller that builds values by hand must pass integers as `int`, `int64` or
+`json.Number`, not `float64`. Field documents decoded from JSON already keep
+integers exact: `TestFieldsIntegerValueFromJSON` fails if decoding falls back
+to float64, which would encode `1` as `1.0`.
 
-| JSON text | Python | Go (field doc decoded from JSON) |
-|---|---|---|
-| `1.50` | `1.5` | `1.5`: same; my earlier note was wrong to list this |
-| `1e2` | `100.0` | `100.0`: same |
-| `1` | `1` | `1`: same, **after a fix**. Before it, `SignedField` used Go's default float64 decoding and encoded `1.0`, so an integer-valued field signed by Python failed verification in Go. Fixed by decoding values with `json.Number` (`TestFieldsIntegerValueFromJSON`, which fails without the fix). |
-| `123456789012345678901234` | exact integer | `1.2345678901234569e+23`: **differs**. Integers beyond int64 go through float64. |
-
-One remaining difference, then: integers that need more than 64 bits. A Go
-caller that builds values by hand must also pass integers as `int`, `int64`
-or `json.Number`, not `float64`. **Once the Python code is removed, the Go
-encoding is the specification**, and these cases are defined by `Canonical`,
-not by Python.
+History: the format was chosen to match the prototype's
+`json.dumps(..., sort_keys=True, separators=(",",":"))`. Before the prototype
+was retired, `TestCanonicalMatchesPython` checked 13 values byte for byte,
+including non-ASCII, control characters, DEL, `-0.0`, and floats at the
+fixed/exponent boundaries. Edge cases checked by hand then: `1.50` gives `1.5`
+and `1e2` gives `100.0`, the same in both. `1` gave `1` in both only after the
+`json.Number` fix above. Integers beyond 64 bits were the one remaining
+difference.
