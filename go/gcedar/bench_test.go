@@ -7,14 +7,14 @@ import (
 	"time"
 )
 
-// Port of bench.py: how badly does threshold expansion blow up, and what does
+// How badly does threshold expansion blow up, and what does
 // it cost per request? Run with:
 //
 //	go test ./gcedar -run '^$' -bench Expansion -benchtime 300x
 //
 // Metrics per config: candidates (upper bound before minimization), permits,
 // KB of Cedar text, compile-ms, and ns/op = one Phase B authorization. As in
-// bench.py, per-request latency is only measured up to 20,000 permits; flat
+// the original benchmark, per-request latency is only measured up to 20,000 permits; flat
 // configs must produce exactly C(n,k) permits.
 
 type benchConfig struct {
@@ -69,7 +69,7 @@ func BenchmarkExpansion(b *testing.B) {
 				b.ReportMetric(float64(c.NPermit), "permits")
 				b.ReportMetric(float64(len(c.Policies))/1024, "KB")
 				b.ReportMetric(compileMS, "compile-ms")
-				b.Skipf("%d permits: latency not measured (bench.py limit 20,000); compile %.0f ms, %.0f KB", c.NPermit, compileMS, float64(len(c.Policies))/1024)
+				b.Skipf("%d permits: latency not measured (limit 20,000); compile %.0f ms, %.0f KB", c.NPermit, compileMS, float64(len(c.Policies))/1024)
 			}
 			ev, err := NewEvaluator(cfg.doc, c)
 			if err != nil {
@@ -79,7 +79,7 @@ func BenchmarkExpansion(b *testing.B) {
 			ents := ev.Entities("refs/heads/main")
 			i := 0
 			for b.Loop() {
-				// as bench.py: signer sets of growing size names[:1], names[:2], ...
+				// signer sets of growing size names[:1], names[:2], ...
 				ev.DecideWith(ents, Facts{Ref: "refs/heads/main", Pusher: names[0], Author: names[0], Signers: names[:i%len(names)+1]})
 				i++
 			}

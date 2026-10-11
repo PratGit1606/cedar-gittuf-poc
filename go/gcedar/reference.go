@@ -93,10 +93,9 @@ func toSet(xs []string) map[string]bool {
 
 // ReferenceAllows is a direct (no Cedar, no expansion) implementation of the
 // strict-mode semantics, by backtracking search rather than set expansion. It
-// is a sanity check for the Go port, not an oracle for gittuf. It differs from
-// ../gcedar/reference.py in one deliberate way: a signer never counts toward
-// two members of the same threshold (reference.py lets one signer satisfy two
-// overlapping roles).
+// is a sanity check for the compiler, not an oracle for gittuf. A signer
+// never counts toward two members of the same threshold (the archived
+// prototype's reference let one signer satisfy two overlapping roles).
 func ReferenceAllows(doc *Doc, f Facts) bool {
 	approvals := toSet(f.Approvals)
 	if doc.ForbidSelfApproval && approvals[f.Author] {

@@ -13,7 +13,7 @@ import (
 	"github.com/cedar-policy/cedar-go"
 )
 
-// Signed fields (port of ../gcedar/fields.py): "field X must be signed by a
+// Signed fields: "field X must be signed by a
 // threshold of keys in set Y".
 //
 // A document is a set of fields, each carrying signatures. Phase A verifies the
@@ -56,7 +56,7 @@ type SignedField struct {
 
 // UnmarshalJSON decodes Value with json.Number so integers stay integers:
 // the default float64 decoding would encode 1 as "1.0" in Canonical, while
-// the signer (and Python's json.dumps) encoded "1".
+// the signer encoded "1".
 func (f *SignedField) UnmarshalJSON(b []byte) error {
 	var raw struct {
 		Value json.RawMessage   `json:"value"`
@@ -80,10 +80,14 @@ type FieldDoc struct {
 	Fields map[string]SignedField `json:"fields"`
 }
 
-// Canonical is the signed encoding of a field: the same bytes as Python's
-// json.dumps([name, value], sort_keys=True, separators=(",", ":")), so
-// signatures made by the Python tool verify here. Supported values: nil, bool,
-// string, int, float64, json.Number, []any, map[string]any.
+// Canonical is the signed encoding of a field, and this function is its
+// specification: the JSON array [name, value] with no whitespace, object keys
+// sorted by code point, strings escaped to printable ASCII (asciiJSONString),
+// integers in decimal, floats in shortest round-trip form (reprFloat).
+// Supported values: nil, bool, string, int, int64, float64, json.Number,
+// []any, map[string]any. Known limit: integers beyond 64 bits are encoded via
+// float64 and lose precision. (The format was chosen to match the archived
+// prototype, and was checked against it before the prototype was retired.)
 func Canonical(name string, value any) ([]byte, error) {
 	var b strings.Builder
 	if err := canon(&b, []any{name, value}); err != nil {
@@ -99,13 +103,13 @@ func canon(b *strings.Builder, v any) error {
 	case bool:
 		b.WriteString(strconv.FormatBool(x))
 	case string:
-		pyString(b, x)
+		asciiJSONString(b, x)
 	case int:
 		b.WriteString(strconv.Itoa(x))
 	case int64:
 		b.WriteString(strconv.FormatInt(x, 10))
 	case float64:
-		s, err := pyFloat(x)
+		s, err := reprFloat(x)
 		if err != nil {
 			return err
 		}
@@ -136,13 +140,13 @@ func canon(b *strings.Builder, v any) error {
 		for k := range x {
 			keys = append(keys, k)
 		}
-		sort.Slice(keys, func(i, j int) bool { return pyLess(keys[i], keys[j]) })
+		sort.Slice(keys, func(i, j int) bool { return codePointLess(keys[i], keys[j]) })
 		b.WriteByte('{')
 		for i, k := range keys {
 			if i > 0 {
 				b.WriteByte(',')
 			}
-			pyString(b, k)
+			asciiJSONString(b, k)
 			b.WriteByte(':')
 			if err := canon(b, x[k]); err != nil {
 				return err
@@ -155,8 +159,8 @@ func canon(b *strings.Builder, v any) error {
 	return nil
 }
 
-// pyLess orders strings by code point, like Python's sorted().
-func pyLess(a, b string) bool {
+// codePointLess orders strings by Unicode code point.
+func codePointLess(a, b string) bool {
 	ra, rb := []rune(a), []rune(b)
 	for i := 0; i < len(ra) && i < len(rb); i++ {
 		if ra[i] != rb[i] {
@@ -166,8 +170,11 @@ func pyLess(a, b string) bool {
 	return len(ra) < len(rb)
 }
 
-// pyString writes s as Python's json.dumps does with ensure_ascii=True.
-func pyString(b *strings.Builder, s string) {
+// asciiJSONString writes s as a JSON string with only printable ASCII: `"`,
+// `\` and \n \r \t \b \f get short escapes; other control characters, DEL
+// and all non-ASCII become lowercase \uXXXX (UTF-16 surrogate pairs above
+// U+FFFF).
+func asciiJSONString(b *strings.Builder, s string) {
 	b.WriteByte('"')
 	for _, r := range s {
 		switch {
@@ -197,8 +204,10 @@ func pyString(b *strings.Builder, s string) {
 	b.WriteByte('"')
 }
 
-// pyFloat formats f like Python's float repr.
-func pyFloat(f float64) (string, error) {
+// reprFloat formats f in shortest round-trip form: fixed notation with at
+// least one decimal (1.0) for 1e-4 <= |f| < 1e16 and zero, otherwise exponent
+// notation (1e+16, 1e-05).
+func reprFloat(f float64) (string, error) {
 	if math.IsNaN(f) || math.IsInf(f, 0) {
 		return "", fmt.Errorf("canonical: %v is not allowed", f)
 	}

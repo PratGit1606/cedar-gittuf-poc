@@ -12,8 +12,8 @@ import (
 type Mode string
 
 const (
-	// ModeStrict is the POC's original semantics (byte-compatible with
-	// compile.py): the first matching rule decides, configurable default,
+	// ModeStrict is the POC's original semantics (those of the archived
+	// prototype, except where FINDINGS.md says otherwise): the first matching rule decides, configurable default,
 	// principals are names, roles and approvals are supported. It is the
 	// "what Cedar could do" variant and is NOT gittuf's semantics.
 	ModeStrict Mode = "strict"

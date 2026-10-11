@@ -9,9 +9,8 @@ import (
 	"github.com/pratham/gcedar/gcedar"
 )
 
-// demo is the port of demo.py: JSON delegations -> Cedar, signatures
-// verified on the host. demo.py's last section (privilege-escalation check
-// via analysis.py) is not ported: the SMT proofs of Step 4 replace it.
+// demo runs the end-to-end example: JSON delegations -> Cedar, signatures
+// verified on the host. Privilege-escalation checks are in PROOFS.md (smt/).
 func demo() {
 	names := []string{"alice", "bob", "carol", "dave", "erin"}
 	sks := map[string]ed25519.PrivateKey{}
@@ -64,5 +63,5 @@ func demo() {
 		}
 		fmt.Printf("%-42s -> %s  verified=%v permits_fired=%v\n", tc.label, verdict, d.Signers, fired)
 	}
-	fmt.Println("\n(privilege-escalation check: see the SMT proofs, Step 4; analysis.py is not ported)")
+	fmt.Println("\n(privilege-escalation check: see PROOFS.md and smt/run.sh)")
 }

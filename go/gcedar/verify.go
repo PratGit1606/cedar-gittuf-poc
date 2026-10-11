@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// Two-phase verifier (port of ../gcedar/verify.py), strict mode.
+// Two-phase verifier, strict mode.
 //
 // Phase A (host): everything Cedar must never do itself - parse untrusted
 // data, verify ed25519 signatures, interpret forge review data. Its output is

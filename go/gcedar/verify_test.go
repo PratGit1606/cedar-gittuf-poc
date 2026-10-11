@@ -8,7 +8,8 @@ import (
 	"testing"
 )
 
-// Port of tests/test_verifier.py (same cases), plus the shared-key path.
+// Verifier cases (carried over from the archived prototype's tests), plus the
+// shared-key path.
 
 type world struct {
 	sk map[string]ed25519.PrivateKey

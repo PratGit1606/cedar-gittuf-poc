@@ -3,7 +3,7 @@
 //	gcedar compile doc.json              # policies to stdout
 //	gcedar compile -out dir doc.json     # dir/policies.cedar, dir/schema.cedarschema, dir/meta.json
 //	gcedar compile -mode gittuf doc.json # gittuf semantics (see gcedar.ModeGittuf)
-//	gcedar demo                          # end-to-end example (port of demo.py)
+//	gcedar demo                          # end-to-end example
 package main
 
 import (

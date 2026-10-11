@@ -1,9 +1,9 @@
 // Package gcedar compiles gittuf-style JSON delegations into Cedar policies.
 //
-// It is a port of ../gcedar/compile.py. For any input document the compiled
-// policy text is intended to be byte-identical to the Python compiler's output
-// (see TestPythonByteCompat); error cases agree on "error vs no error" but not
-// on message text.
+// It started as a port of a Python prototype (now archived outside this repo)
+// and was checked byte-for-byte against it before the prototype was retired;
+// FINDINGS.md lists the deliberate differences. The Go code is now the
+// reference implementation.
 package gcedar
 
 import (
@@ -73,9 +73,9 @@ func (e *DelegationError) Error() string { return e.Msg }
 type ExpansionTooLarge struct{ DelegationError }
 
 // DuplicateMemberError is returned when a threshold lists the same member twice.
-// Python's compile.py accepts this and counts the member twice; gittuf accepts
-// it and counts it once (see FINDINGS.md, Finding 4). Both are surprising, so
-// the Go compiler rejects it.
+// The archived prototype accepted this and counted the member twice; gittuf
+// accepts it and counts it once (FINDINGS.md, Finding 4). Both are surprising,
+// so the compiler rejects it.
 type DuplicateMemberError struct{ DelegationError }
 
 func checkDuplicates(members []string) error {
@@ -173,7 +173,7 @@ func subsetOf(a, b pset) bool { // both sorted
 	return i == len(a)
 }
 
-// lessPset orders sets like Python's sorted(list) comparison.
+// lessPset orders sets lexicographically as lists, which fixes permit order.
 func lessPset(a, b pset) bool {
 	for i := 0; i < len(a) && i < len(b); i++ {
 		if a[i] != b[i] {
@@ -449,7 +449,7 @@ func Compile(doc *Doc) (*Compiled, error) {
 
 	c.Policies = b.String()
 	if c.Policies == "" {
-		c.Policies = "\n" // Python: "\n".join([]) + "\n"
+		c.Policies = "\n" // an empty policy set is a single newline
 	}
 	return c, nil
 }
