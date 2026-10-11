@@ -33,7 +33,8 @@ type Role struct {
 	Members   []string `json:"members"`
 }
 
-// Rule protects refs matching Pattern. The first matching rule decides.
+// Rule protects refs matching Pattern. In strict mode the first matching rule
+// decides; in gittuf mode any matching rule may.
 type Rule struct {
 	Name      string   `json:"name"`
 	Pattern   string   `json:"pattern"`
@@ -194,7 +195,7 @@ func lookupRole(member string, roles map[string]Role, stack []string) (string, R
 	name := member[1:]
 	for _, s := range stack {
 		if s == name {
-			return "", Role{}, errf("cyclic role reference: %s", strings.Join(append(append([]string{}, stack...), name), " -> "))
+			return "", Role{}, errf("cyclic role reference: %s", strings.Join(push(stack, name), " -> "))
 		}
 	}
 	r, ok := roles[name]
@@ -373,7 +374,10 @@ func Compile(doc *Doc) (*Compiled, error) {
 		emit("forbid", "context.approvals.contains(context.author)", PolicyMeta{Rule: "<self-approval>"})
 	}
 
-	for i, rule := range doc.Rules {
+	// negs[j] is "rule j does not match"; strict mode's first-match-wins puts
+	// every earlier rule's negation into each permit.
+	var negs []string
+	for _, rule := range doc.Rules {
 		for _, m := range rule.Members {
 			if !strings.HasPrefix(m, "@") {
 				if _, ok := doc.Principals[m]; !ok {
@@ -390,13 +394,9 @@ func Compile(doc *Doc) (*Compiled, error) {
 			return nil, err
 		}
 		match := "resource.name like " + pat
-		var earlier strings.Builder
-		for j := 0; j < i; j++ {
-			p, err := likePattern(doc.Rules[j].Pattern)
-			if err != nil {
-				return nil, err
-			}
-			fmt.Fprintf(&earlier, " && !(resource.name like %s)", p)
+		earlier := ""
+		for _, n := range negs {
+			earlier += " && " + n
 		}
 		combos, err := ExpandThreshold(rule.Members, rule.Threshold, doc.Roles, nil)
 		if err != nil {
@@ -412,18 +412,14 @@ func Compile(doc *Doc) (*Compiled, error) {
 				}
 				users[k] = "User::" + q
 			}
-			body := fmt.Sprintf("%s%s && context.%s.containsAll([%s])", match, earlier.String(), src, strings.Join(users, ", "))
+			body := fmt.Sprintf("%s%s && context.%s.containsAll([%s])", match, earlier, src, strings.Join(users, ", "))
 			emit("permit", body, PolicyMeta{Rule: rule.Name, Combo: append([]string{}, combo...)})
 		}
+		negs = append(negs, "!("+match+")")
 	}
 
 	if def == "allow" {
-		parts := make([]string, len(doc.Rules))
-		for i, r := range doc.Rules {
-			p, _ := likePattern(r.Pattern) // already validated above
-			parts[i] = fmt.Sprintf("!(resource.name like %s)", p)
-		}
-		none := strings.Join(parts, " && ")
+		none := strings.Join(negs, " && ")
 		if none == "" {
 			none = "true"
 		}
