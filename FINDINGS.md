@@ -12,7 +12,7 @@
 
 | | |
 |---|---|
-| gittuf repository | https://github.com/gittuf/gittuf (fresh clone at `../gittuf`, unmodified) |
+| gittuf repository | https://github.com/gittuf/gittuf (pinned, unmodified checkout created by `oracle/setup.sh` in `.gittuf-oracle/`) |
 | gittuf commit | `0b0278ec1d484e59d2107c38f38c059908a33856` (2026-10-08, "Merge pull request #1645 from shreyaabaranwal/fix/root-metadata-bypassrsl") |
 | Go | go1.27.1 linux/amd64 |
 | cedar-go | v1.8.0 |
@@ -41,7 +41,7 @@ On the Cedar side, Phase A is simulated for each mode: the set of principals,
 or in gittuf mode the set of distinct key IDs, whose key signed the RSL entry
 or the attestation.
 
-Run with: `cd oracle && go test -v .` (`ORACLE_DOCS=300` for the large random
+Run with: `oracle/setup.sh`, then `cd oracle && go test -v .` (`ORACLE_DOCS=300` for the large random
 run, `ORACLE_DEBUG=1` for gittuf's own trace).
 
 ## Two compile modes
