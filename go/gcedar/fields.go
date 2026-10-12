@@ -257,9 +257,8 @@ type FieldResult struct {
 
 // FieldVerifier checks signed-field documents against a FieldPolicy.
 type FieldVerifier struct {
-	Policy   *FieldPolicy
-	Policies string
-	ps       *cedar.PolicySet
+	Policy *FieldPolicy
+	ps     *cedar.PolicySet
 }
 
 // NewFieldVerifier compiles and validates the policy. Like NewVerifier, it
@@ -279,7 +278,7 @@ func NewFieldVerifier(p *FieldPolicy) (*FieldVerifier, error) {
 	if err := ValidatePoliciesWith(FieldSchema, ps); err != nil {
 		return nil, err
 	}
-	return &FieldVerifier{Policy: p, Policies: text, ps: ps}, nil
+	return &FieldVerifier{Policy: p, ps: ps}, nil
 }
 
 // Check runs Phase A (signature checks, lazily: only keys the field's rule

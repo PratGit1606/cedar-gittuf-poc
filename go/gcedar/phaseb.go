@@ -108,9 +108,9 @@ func (e *Evaluator) Entities(ref string) cedar.EntityMap {
 	return m
 }
 
-// RequestMode builds the Cedar request for a set of facts; the context record
+// request builds the Cedar request for a set of facts; the context record
 // matches c's schema.
-func RequestMode(c *Compiled, f Facts) cedar.Request {
+func request(c *Compiled, f Facts) cedar.Request {
 	mode := c.Mode
 	ctx := cedar.RecordMap{
 		"signers":   userSet(f.Signers),
@@ -148,7 +148,7 @@ func (e *Evaluator) DecideWith(ents cedar.EntityMap, f Facts) Decision {
 	if e.Compiled.UsesNow && f.Now.IsZero() {
 		return Decision{Errors: []string{"policy needs context.now but the host supplied no time"}} // fail closed
 	}
-	dec, diag := cedar.Authorize(e.ps, ents, RequestMode(e.Compiled, f))
+	dec, diag := cedar.Authorize(e.ps, ents, request(e.Compiled, f))
 	d := Decision{Allowed: dec == cedar.Allow}
 	for _, r := range diag.Reasons {
 		d.Reasons = append(d.Reasons, e.meta(r.PolicyID))

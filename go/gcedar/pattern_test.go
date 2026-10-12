@@ -65,7 +65,7 @@ func TestBracketRewriteMatchesFnmatch(t *testing.T) {
 	rng := rand.New(rand.NewSource(8))
 	refs := corpus(rng, 3000)
 	for _, p := range []string{"refs/heads/rel-[ab]", "refs/heads/rel-[a-c]*", "refs/heads/rel-[0-9]", "refs/heads/[mr]*", "refs/heads/rel-[ab-]", "refs/heads/rel-[a-b1]*"} {
-		alts, ok := LikeAlternatives(p, MaxLikeAlternatives)
+		alts, ok := LikeAlternatives(p)
 		if !ok {
 			t.Fatalf("%q should be rewritable", p)
 		}
@@ -78,7 +78,7 @@ func TestBracketRewriteMatchesFnmatch(t *testing.T) {
 		t.Logf("%-26s -> %d like alternatives", p, len(alts))
 	}
 	for _, p := range []string{"refs/heads/rel-?", "refs/heads/rel-[!a]", "refs/heads/rel-[^a]", `refs/heads/a\*`, "refs/heads/[a-z][a-z][a-z]"} {
-		if _, ok := LikeAlternatives(p, MaxLikeAlternatives); ok {
+		if _, ok := LikeAlternatives(p); ok {
 			t.Errorf("%q must not be rewritten (no exact like form within bounds)", p)
 		}
 	}

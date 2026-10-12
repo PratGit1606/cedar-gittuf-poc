@@ -19,14 +19,14 @@ func TestDifferential(t *testing.T) {
 	}
 }
 
-func differential(t *testing.T, rng *rand.Rand, features bool) int {
+func differential(t *testing.T, rng *rand.Rand, extensions bool) int {
 	total, mismatches, changed := 0, 0, 0
 	for docN := 0; docN < 150; docN++ {
 		doc := randomDoc(rng)
-		if features {
-			doc = withFeatures(rng, doc)
+		if extensions {
+			doc = withExtensions(rng, doc)
 		}
-		bare := withoutFeatures(doc)
+		bare := withoutExtensions(doc)
 		c, err := Compile(doc)
 		if err != nil {
 			t.Fatalf("compile: %v", err)
@@ -54,7 +54,7 @@ func differential(t *testing.T, rng *rand.Rand, features bool) int {
 			ents := ev.Entities(ref)
 			for _, k := range cases {
 				f := Facts{Ref: ref, Pusher: names[0], Author: k.au, Signers: k.s, Approvals: k.a}
-				if features {
+				if extensions {
 					f.Now = testInstants[rng.Intn(len(testInstants))]
 					f.Host = map[string]bool{}
 					for _, name := range testFacts {
@@ -81,7 +81,7 @@ func differential(t *testing.T, rng *rand.Rand, features bool) int {
 		}
 	}
 	t.Logf("differential (new fields: %v): 150 docs, %d verdicts, %d mismatches; %d verdicts decided differently because of the new fields",
-		features, total, mismatches, changed)
+		extensions, total, mismatches, changed)
 	return total
 }
 

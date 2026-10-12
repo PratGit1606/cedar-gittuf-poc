@@ -41,7 +41,7 @@ func ParseDoc(b []byte) (*Doc, error) {
 	return &d, nil
 }
 
-// usesExtensions reports the strict-only features doc uses, for the gittuf
+// usesExtensions reports the strict-only extensions doc uses, for the gittuf
 // mode error message.
 func (d *Doc) usesExtensions() []string {
 	var out []string
@@ -180,7 +180,7 @@ func compileForbids(doc *Doc, emit func(kind, body string, m PolicyMeta)) error 
 		return nil
 	}
 	if len(doc.Forbid) == 0 {
-		return errf("forbid is empty")
+		return errf("forbid is empty; remove it or add at least one entry")
 	}
 	names := map[string]bool{}
 	for _, r := range doc.Rules {

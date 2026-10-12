@@ -6,10 +6,10 @@ import (
 	"time"
 )
 
-// Tests for the strict-mode features in features.go: forbid, except, window,
+// Tests for the strict-mode extensions in extensions.go: forbid, except, window,
 // require. Their semantics are also covered by TestDifferential.
 
-func featureDoc() *Doc {
+func extensionDoc() *Doc {
 	return &Doc{
 		Principals: map[string]string{"alice": "", "bob": "", "mallory": ""},
 		Rules: []Rule{
@@ -24,7 +24,7 @@ func featureDoc() *Doc {
 	}
 }
 
-func TestFeatureValidation(t *testing.T) {
+func TestExtensionValidation(t *testing.T) {
 	cases := []struct {
 		name string
 		edit func(d *Doc)
@@ -52,13 +52,13 @@ func TestFeatureValidation(t *testing.T) {
 		{"require keyword", func(d *Doc) { d.Rules[0].Require = map[string]bool{"like": true} }, "bad fact name"},
 	}
 	for _, c := range cases {
-		d := featureDoc()
+		d := extensionDoc()
 		c.edit(d)
 		if _, err := Compile(d); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: got %v, want error containing %q", c.name, err, c.want)
 		}
 	}
-	if _, err := Compile(featureDoc()); err != nil {
+	if _, err := Compile(extensionDoc()); err != nil {
 		t.Fatalf("valid document rejected: %v", err)
 	}
 }
@@ -77,7 +77,7 @@ func TestParseDocStrict(t *testing.T) {
 	}
 }
 
-func TestFeaturesRejectedInGittufMode(t *testing.T) {
+func TestExtensionsRejectedInGittufMode(t *testing.T) {
 	keys := map[string]string{"alice": "k1", "mallory": "k2"}
 	rule := func() Rule {
 		return Rule{Name: "main", Pattern: "refs/heads/main", Threshold: 1, Members: []string{"alice"}}
@@ -102,13 +102,13 @@ func TestFeaturesRejectedInGittufMode(t *testing.T) {
 }
 
 // The schema grows only by what the document uses.
-func TestFeatureSchemaOnlyWhenUsed(t *testing.T) {
-	d := featureDoc()
+func TestExtensionSchemaOnlyWhenUsed(t *testing.T) {
+	d := extensionDoc()
 	d.Rules[0].Window, d.Rules[0].Require = nil, nil
 	if c, err := Compile(d); err != nil || c.Schema != Schema {
 		t.Errorf("except/forbid alone must not change the schema: %v", err)
 	}
-	c, err := Compile(featureDoc())
+	c, err := Compile(extensionDoc())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,8 +118,8 @@ func TestFeatureSchemaOnlyWhenUsed(t *testing.T) {
 	}
 }
 
-func TestFeatureDecisionsAndReasons(t *testing.T) {
-	d := featureDoc()
+func TestExtensionDecisionsAndReasons(t *testing.T) {
+	d := extensionDoc()
 	c, err := Compile(d)
 	if err != nil {
 		t.Fatal(err)

@@ -41,7 +41,7 @@ func CompileMode(doc *Doc, mode Mode) (*Compiled, error) {
 	case ModeGittuf:
 		return compileGittuf(doc)
 	}
-	return nil, errf("unknown mode %q", mode)
+	return nil, errf("unknown mode %q; use strict or gittuf", mode)
 }
 
 // LikeExpressible reports whether a gittuf (fnmatch) pattern means the same
@@ -89,7 +89,7 @@ func gittufMatchExpr(p string) (string, error) {
 		}
 		return "resource.name like " + pat, nil
 	}
-	if alts, ok := LikeAlternatives(p, MaxLikeAlternatives); ok {
+	if alts, ok := LikeAlternatives(p); ok {
 		return likeDisjunction(alts), nil
 	}
 	if strings.ContainsAny(p, "\"\\") {

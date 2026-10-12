@@ -380,7 +380,7 @@ code closes it:
 | Member listed twice in a rule or role (`["a","a"]`) | Prototype: counted twice | compile error `DuplicateMemberError` (strict and gittuf mode) | `TestDuplicateRuleMemberRejected`, `TestDuplicateRoleMemberRejected` |
 | One signer satisfying two members of one threshold via overlapping roles (2-of-[@r1,@r2], a in both; or 2-of-[a,@r], a in @r) | Prototype and Go: a alone met it | each chosen member must be met by **disjoint** signers | `TestOverlappingMembersCountOnce`; differential test vs an independent search-based reference (a mutant without the rule gives 2,752 mismatches) |
 | Same signer listed twice in Cedar context | already a set | unchanged (Cedar `Set`) | `TestRepeatedSignerInFactsCountsOnce` |
-| Two principal names bound to one public key (one signature filed under both names) | Prototype Phase A: counted twice (Finding 5) | strict: the Go Phase A verifier refuses the document (hex is normalised, so `AB..` = `ab..`); gittuf mode: key ID is the identity | `TestSharedKeyRejected` (verify_test.go), `TestGittufModeSharedKeyCountsOnce` |
+| Two principal names bound to one public key (one signature filed under both names) | Prototype Phase A: counted twice (Finding 5) | strict: the Go Phase A verifier refuses the document (hex is normalised, so `AB..` = `ab..`); gittuf mode: key ID is the identity | `TestSharedKeyRejected` (phasea_test.go), `TestGittufModeSharedKeyCountsOnce` |
 | Field spec listing a key twice; two field keys with the same public key | Prototype: counted twice | compile error; field verifier refuses the document | fields_test.go |
 
 The overlapping-roles row changes strict-mode meaning compared with the

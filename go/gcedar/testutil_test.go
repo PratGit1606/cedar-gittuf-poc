@@ -103,9 +103,9 @@ var testInstants = []time.Time{
 
 var testFacts = []string{"ci_passed", "fast_forward"}
 
-// withFeatures adds random excepts, windows, requires and top-level forbids
-// (features.go) to a random strict-mode document.
-func withFeatures(rng *rand.Rand, d *Doc) *Doc {
+// withExtensions adds random excepts, windows, requires and top-level forbids
+// (extensions.go) to a random strict-mode document.
+func withExtensions(rng *rand.Rand, d *Doc) *Doc {
 	names := sortedNames(d)
 	for i := range d.Rules {
 		r := &d.Rules[i]
@@ -140,8 +140,8 @@ func withFeatures(rng *rand.Rand, d *Doc) *Doc {
 	return d
 }
 
-// withoutFeatures is d with every features.go field removed.
-func withoutFeatures(d *Doc) *Doc {
+// withoutExtensions is d with every extensions.go field removed.
+func withoutExtensions(d *Doc) *Doc {
 	c := *d
 	c.Forbid = nil
 	c.Rules = append([]Rule{}, d.Rules...)

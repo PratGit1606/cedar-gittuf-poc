@@ -11,9 +11,9 @@ func classChar(r rune) bool {
 }
 
 // LikeAlternatives rewrites an fnmatch pattern made of `*`, literals and
-// positive classes over [A-Za-z0-9._/-] into equivalent `like` patterns. `?`,
-// [!..] and escapes return ok=false: `like` has no one-character wildcard.
-func LikeAlternatives(p string, max int) (alts []string, ok bool) {
+// positive classes over [A-Za-z0-9._/-] into at most MaxLikeAlternatives
+// equivalent `like` patterns. `?`, [!..] and escapes return ok=false.
+func LikeAlternatives(p string) (alts []string, ok bool) {
 	alts = []string{""}
 	rs := []rune(p)
 	for i := 0; i < len(rs); i++ {
@@ -65,7 +65,7 @@ func LikeAlternatives(p string, max int) (alts []string, ok bool) {
 			}
 		}
 		alts = next
-		if len(alts) > max {
+		if len(alts) > MaxLikeAlternatives {
 			return nil, false
 		}
 		i = j
@@ -79,7 +79,7 @@ func NeedsPhaseAMatch(p string) bool {
 	if LikeExpressible(p) {
 		return false
 	}
-	_, ok := LikeAlternatives(p, MaxLikeAlternatives)
+	_, ok := LikeAlternatives(p)
 	return !ok
 }
 

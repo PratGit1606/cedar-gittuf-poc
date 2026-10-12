@@ -20,7 +20,7 @@ Treat it as a pointer, not evidence.
 `gcedar` (`Compile` / `CompileMode`), validated against the compiled schema
 with cedar-go's experimental validator. Rows 4, 6, 8 and 9 use the
 strict-mode fields `forbid`, `except`, `window` and `require` (README,
-`go/gcedar/features.go`); gittuf mode rejects those fields with an error that
+`go/gcedar/extensions.go`); gittuf mode rejects those fields with an error that
 says gittuf cannot express them.
 
 | # | Capability | gittuf today | GitHub metadata (docs, untested) | Cedar approach | Phase A fact the host must supply | Evidence | Test |

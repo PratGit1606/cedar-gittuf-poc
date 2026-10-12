@@ -142,7 +142,6 @@ func TestSharedKeyRejected(t *testing.T) {
 	}
 }
 
-
 const forgeRef = "refs/heads/feature/x"
 
 func pr(reviews []Review, dismissals []Dismissal, author string) *Change {

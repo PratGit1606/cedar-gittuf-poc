@@ -6,7 +6,7 @@ import (
 )
 
 // Every path where one key could count twice toward a threshold. Phase A
-// paths (one key bound to two principal names) are in verify_test.go and
+// paths (one key bound to two principal names) are in phasea_test.go and
 // fields_test.go.
 
 func TestDuplicateRuleMemberRejected(t *testing.T) {
