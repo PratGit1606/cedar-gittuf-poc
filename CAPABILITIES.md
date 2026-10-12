@@ -70,10 +70,19 @@ host-computed facts that Cedar takes on trust:
 ## Not covered in this pass
 
 From the original Step 3 list: ref-deletion blocking, admin bypass, and a
-scenario gittuf cannot do at all. These would be variations of rows 4, 6 and 9
-(a forbid on `context.isDeletion`; a permit for an admin role with a forbid
-carve-out; time windows, row 8, are already something gittuf cannot do).
-They are **design-only** and untested, so they are not rows.
+scenario gittuf cannot do at all. Time windows (row 8) are the scenario gittuf
+cannot do. The other two remain **design-only** and untested, so they are not rows:
+
+* **Ref-deletion blocking.** With the new fields it could be a host fact,
+  e.g. `"require": {"not_deletion": true}` on a rule, but no test uses it.
+  On the gittuf side, a search of the `0b0278ec` source (`internal/policy`,
+  `experimental/gittuf`) found no code that treats a ref deletion specially.
+  Checking what gittuf actually does would mean extending the oracle to record
+  RSL entries for deleted refs. That would take more than the hour allowed for
+  this, so it was not done.
+* **Admin bypass.** The compiler cannot express this: Cedar's forbid always
+  wins, so a bypass would need every forbid to carry an `unless` for the admin
+  role. gittuf has no bypass mechanism that I found in the source (not tested).
 
 ## Roles vs gittuf delegated rule files: where the meaning differs
 

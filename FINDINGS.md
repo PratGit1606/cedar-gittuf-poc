@@ -60,6 +60,7 @@ the deliberate differences recorded under "Go change 1" below.
 | Two principals sharing a key | rejected by the Phase A verifier | collapse into one key-ID identity; a rule left with fewer distinct keys than its threshold gets no permits, as in gittuf |
 | Patterns | `*` only (anything else is rejected) | `*` uses `like`; positive classes `[ab]` and `[0-9]` become a bounded OR of `like`; `?`, `[!..]` and escapes are matched in **Phase A** and passed as `context.matchedPatterns` |
 | Roles, `approvals` source, forbid-self-approval | supported | rejected (no gittuf equivalent; see CAPABILITIES.md) |
+| `except`, top-level `forbid`, `window`, `require` (README) | supported | rejected ("gittuf cannot express …") |
 
 Gittuf mode's schema is `context: { signers: Set<User>, matchedPatterns: Set<String> }`.
 
@@ -73,11 +74,17 @@ Gittuf mode's schema is `context: { signers: Set<User>, matchedPatterns: Set<Str
 | Unprotected and default probe | 7 | **2 differ** | 2 can't compile (default deny, by design) |
 | Duplicates and shared-key probe | 9 | **5 differ** | 0 differ |
 | Roles expanded into gittuf rules vs strict-mode roles | 64 | 0 differ | n/a (roles rejected) |
-| **Random documents** (300 docs, 8 pushes each) | 2,400 | 1,575 differ (1,536 can't compile, **39 semantic**) | **0 differ** |
+| **Random documents** (300 docs, 8 pushes each) | 2,400 | 1,409 of 2,008 compared differ (1,392 can't compile, **17 semantic**); 392 not compared | **0 of 1,568 compared differ**; 832 not compared |
 
 What the random documents contain: 41 have two principals sharing a key, 104
 list a member twice, and 144 use a pattern that needs Phase A. Of the 2,400
-pushes, gittuf allowed 1,270.
+pushes, gittuf allowed 1,270. "Not compared" means the document lists a
+member twice and the Go compiler rejects it by design (Finding 4). The random row is from the run of
+2026-10-12 (repo commit `52bb4af`, gittuf `0b0278ec`, fresh `oracle/setup.sh`
+clone, `ORACLE_DOCS=300`, 13/13 oracle tests passed in 666 s). The previous
+version of this row compared all 2,400 strict-mode pushes, including those on
+documents that list a member twice, and showed 1,575 differences (39
+semantic).
 
 **The oracle catches errors (mutation check).** I broke gittuf mode on purpose
 and reran 100 random documents:
