@@ -1,4 +1,4 @@
-//! Two SMT proofs about policies emitted by the Go compiler (`gcedar compile`),
+//! Four SMT proofs about policies emitted by the Go compiler (`gcedar compile`),
 //! checked with cedar-policy-symcc and cvc5. Run via `smt/run.sh`.
 //!
 //! Every query states its expected outcome; the program prints the actual
@@ -21,6 +21,14 @@ const SCOPE_MAIN: &str =
 /// Analysis-only policy for proof 2: "the request has the author among the approvals".
 const AUTHOR_IN_APPROVALS: &str =
     "permit(principal, action, resource) when { context.approvals.contains(context.author) };\n";
+
+/// Analysis-only policy for proof 3: "mallory is among the signers".
+const MALLORY_SIGNED: &str =
+    "permit(principal, action, resource) when { context.signers.contains(User::\"mallory\") };\n";
+
+/// Analysis-only policy for proof 4: "the request is after main's not_after".
+const AFTER_NOT_AFTER: &str =
+    "permit(principal, action, resource) when { context.now > datetime(\"2026-12-19T23:59:59Z\") };\n";
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Expect {
@@ -97,6 +105,16 @@ async fn main() -> ExitCode {
           Disjoint, "p2_forbid", AUTHOR_IN_APPROVALS, false, Holds),
         q("C2  without the forbid: no request with author in approvals is allowed?",
           Disjoint, "p2_noforbid", AUTHOR_IN_APPROVALS, false, Counterexample),
+        // ---- Proof 3 (strict mode): an except on main's rule ----
+        q("P3  main 1-of-{alice,mallory} except [mallory]: on main, no request with mallory among the signers is allowed?",
+          Disjoint, "p3_except", MALLORY_SIGNED, true, Holds),
+        q("C3  same rule without the except: on main, no request with mallory among the signers is allowed?",
+          Disjoint, "p3_noexcept", MALLORY_SIGNED, true, Counterexample),
+        // ---- Proof 4 (strict mode): a time window on main's rule ----
+        q("P4  main with not_after 2026-12-19T23:59:59Z: on main, no request with now after it is allowed?",
+          Disjoint, "p4_window", AFTER_NOT_AFTER, true, Holds),
+        q("C4  main without the window: on main, no request with now after 2026-12-19T23:59:59Z is allowed?",
+          Disjoint, "p4_nowindow", AFTER_NOT_AFTER, true, Counterexample),
     ];
 
     let mut compiler = CedarSymCompiler::new(LocalSolver::cvc5().expect("cvc5 (set CVC5=path)"))

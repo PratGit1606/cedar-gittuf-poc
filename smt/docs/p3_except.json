@@ -1,0 +1,1 @@
+{"principals":{"alice":"alice","bob":"bob","mallory":"mallory"},"rules":[{"name":"main","pattern":"refs/heads/main","threshold":1,"members":["alice","mallory"],"except":["mallory"]},{"name":"heads","pattern":"refs/heads/*","threshold":1,"members":["mallory"]}]}

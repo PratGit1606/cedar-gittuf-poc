@@ -1,0 +1,1 @@
+{"principals":{"alice":"alice","bob":"bob"},"rules":[{"name":"main","pattern":"refs/heads/main","threshold":1,"members":["alice"],"window":{"not_after":"2026-12-19T23:59:59Z"}},{"name":"release","pattern":"refs/heads/release/*","threshold":1,"members":["bob"],"window":{"not_before":"2026-01-01T00:00:00Z"}}]}
