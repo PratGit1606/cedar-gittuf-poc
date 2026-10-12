@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"sort"
 	"strings"
+	"time"
 )
 
 var testPatterns = []string{"refs/heads/main", "refs/heads/*", "refs/heads/release/*", "refs/tags/*", "*"}
@@ -88,4 +89,64 @@ func sortedNames(d *Doc) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// Instants the random windows and request times are drawn from, so that
+// window bounds and requests land on and next to each other.
+var testInstants = []time.Time{
+	time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+	time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC),
+	time.Date(2026, 6, 1, 12, 0, 0, 1e6, time.UTC), // 1 ms later
+	time.Date(2026, 12, 31, 23, 59, 59, 0, time.UTC),
+	time.Date(2027, 6, 1, 0, 0, 0, 0, time.UTC),
+}
+
+var testFacts = []string{"ci_passed", "fast_forward"}
+
+// withFeatures adds random excepts, windows, requires and top-level forbids
+// (features.go) to a random strict-mode document.
+func withFeatures(rng *rand.Rand, d *Doc) *Doc {
+	names := sortedNames(d)
+	for i := range d.Rules {
+		r := &d.Rules[i]
+		if rng.Float64() < 0.35 {
+			r.Except = sample(rng, names, 1+rng.Intn(2))
+		}
+		if rng.Float64() < 0.35 {
+			a, b := rng.Intn(len(testInstants)), rng.Intn(len(testInstants))
+			if a > b {
+				a, b = b, a
+			}
+			w := &Window{NotBefore: testInstants[a].Format(time.RFC3339Nano), NotAfter: testInstants[b].Format(time.RFC3339Nano)}
+			switch rng.Intn(3) {
+			case 0:
+				w.NotBefore = ""
+			case 1:
+				w.NotAfter = ""
+			}
+			r.Window = w
+		}
+		if rng.Float64() < 0.35 {
+			r.Require = map[string]bool{}
+			for _, f := range sample(rng, testFacts, 1+rng.Intn(len(testFacts))) {
+				r.Require[f] = true
+			}
+		}
+	}
+	for i, n := 0, rng.Intn(3); i < n; i++ {
+		d.Forbid = append(d.Forbid, Forbid{Name: fmt.Sprintf("forbid%d", i),
+			Pattern: testPatterns[rng.Intn(len(testPatterns))], Principals: sample(rng, names, 1+rng.Intn(2))})
+	}
+	return d
+}
+
+// withoutFeatures is d with every features.go field removed.
+func withoutFeatures(d *Doc) *Doc {
+	c := *d
+	c.Forbid = nil
+	c.Rules = append([]Rule{}, d.Rules...)
+	for i := range c.Rules {
+		c.Rules[i].Except, c.Rules[i].Window, c.Rules[i].Require = nil, nil, nil
+	}
+	return &c
 }

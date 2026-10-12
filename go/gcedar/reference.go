@@ -1,6 +1,9 @@
 package gcedar
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 // GlobMatch reports whether ref matches pattern, where `*` matches any
 // sequence (including `/`) and every other character is literal. This is the
@@ -92,17 +95,32 @@ func toSet(xs []string) map[string]bool {
 }
 
 // ReferenceAllows is a direct (no Cedar, no expansion) implementation of the
-// strict-mode semantics, by backtracking search rather than set expansion. It
-// is a sanity check for the compiler, not an oracle for gittuf. A signer
-// never counts toward two members of the same threshold (the archived
-// prototype's reference let one signer satisfy two overlapping roles).
+// strict-mode semantics (including forbid, except, window and require), by
+// backtracking search rather than set expansion. It is a sanity check for
+// the compiler, not an oracle for gittuf. A signer never counts toward two
+// members of the same threshold (the archived prototype's reference let one
+// signer satisfy two overlapping roles).
 func ReferenceAllows(doc *Doc, f Facts) bool {
 	approvals := toSet(f.Approvals)
 	if doc.ForbidSelfApproval && approvals[f.Author] {
 		return false
 	}
+	signed := toSet(f.Signers)
+	for _, fb := range doc.Forbid {
+		if GlobMatch(fb.Pattern, f.Ref) && anyIn(fb.Principals, signed) {
+			return false
+		}
+	}
 	for _, rule := range doc.Rules {
 		if GlobMatch(rule.Pattern, f.Ref) {
+			if anyIn(rule.Except, signed) || !inWindow(rule.Window, f.Now) {
+				return false
+			}
+			for name := range rule.Require {
+				if !f.Host[name] {
+					return false
+				}
+			}
 			have := toSet(f.Signers)
 			if rule.source() == "approvals" {
 				have = approvals
@@ -111,4 +129,32 @@ func ReferenceAllows(doc *Doc, f Facts) bool {
 		}
 	}
 	return doc.defaultEffect() == "allow"
+}
+
+func anyIn(xs []string, set map[string]bool) bool {
+	for _, x := range xs {
+		if set[x] {
+			return true
+		}
+	}
+	return false
+}
+
+// inWindow compares at Cedar's millisecond precision; both bounds inclusive.
+func inWindow(w *Window, now time.Time) bool {
+	if w == nil {
+		return true
+	}
+	ms := now.UnixMilli()
+	if w.NotBefore != "" {
+		if t, _ := time.Parse(time.RFC3339, w.NotBefore); ms < t.UnixMilli() {
+			return false
+		}
+	}
+	if w.NotAfter != "" {
+		if t, _ := time.Parse(time.RFC3339, w.NotAfter); ms > t.UnixMilli() {
+			return false
+		}
+	}
+	return true
 }

@@ -10,11 +10,24 @@ import (
 
 // Cedar (via cedar-go) must agree with the Go reference on every input. This
 // only checks the port against its own spec; the gittuf oracle is in ../oracle.
+// The first 150 documents are the original generator's; the next 150 add
+// forbid, except, window and require (features.go) with their own seed.
 func TestDifferential(t *testing.T) {
-	rng := rand.New(rand.NewSource(1609))
-	total, mismatches := 0, 0
+	plain := differential(t, rand.New(rand.NewSource(1609)), false)
+	feat := differential(t, rand.New(rand.NewSource(2026)), true)
+	if plain < 100000 || feat < 100000 {
+		t.Fatalf("too few verdicts: %d, %d", plain, feat)
+	}
+}
+
+func differential(t *testing.T, rng *rand.Rand, features bool) int {
+	total, mismatches, changed := 0, 0, 0
 	for docN := 0; docN < 150; docN++ {
 		doc := randomDoc(rng)
+		if features {
+			doc = withFeatures(rng, doc)
+		}
+		bare := withoutFeatures(doc)
 		c, err := Compile(doc)
 		if err != nil {
 			t.Fatalf("compile: %v", err)
@@ -42,12 +55,23 @@ func TestDifferential(t *testing.T) {
 			ents := ev.Entities(ref)
 			for _, k := range cases {
 				f := Facts{Ref: ref, Pusher: names[0], Author: k.au, Signers: k.s, Approvals: k.a}
+				if features {
+					f.Now = testInstants[rng.Intn(len(testInstants))]
+					f.Host = map[string]bool{}
+					for _, name := range testFacts {
+						f.Host[name] = rng.Intn(2) == 0
+					}
+				}
 				got := ev.DecideWith(ents, f)
 				if len(got.Errors) > 0 {
 					t.Fatalf("evaluation errors: %v", got.Errors)
 				}
 				total++
-				if want := ReferenceAllows(doc, f); got.Allowed != want {
+				want := ReferenceAllows(doc, f)
+				if want != ReferenceAllows(bare, f) {
+					changed++
+				}
+				if got.Allowed != want {
 					mismatches++
 					if mismatches <= 5 {
 						j, _ := json.Marshal(doc)
@@ -57,10 +81,9 @@ func TestDifferential(t *testing.T) {
 			}
 		}
 	}
-	t.Logf("differential: 150 docs, %d verdicts, %d mismatches", total, mismatches)
-	if total < 100000 {
-		t.Fatalf("too few verdicts: %d", total)
-	}
+	t.Logf("differential (new fields: %v): 150 docs, %d verdicts, %d mismatches; %d verdicts decided differently because of the new fields",
+		features, total, mismatches, changed)
+	return total
 }
 
 func flatDoc(n, k int) *Doc {

@@ -150,8 +150,8 @@ func TestFeatureDecisionsAndReasons(t *testing.T) {
 	}
 	for _, k := range cases {
 		got := ev.Decide(k.f)
-		if got.Allowed != k.allow {
-			t.Errorf("%s: got %v, want %v", k.name, got.Allowed, k.allow)
+		if got.Allowed != k.allow || ReferenceAllows(d, k.f) != k.allow {
+			t.Errorf("%s: cedar %v, reference %v, want %v", k.name, got.Allowed, ReferenceAllows(d, k.f), k.allow)
 		}
 		reason := ""
 		if len(got.Reasons) > 0 {
