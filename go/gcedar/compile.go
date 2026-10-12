@@ -1,9 +1,7 @@
-// Package gcedar compiles gittuf-style JSON delegations into Cedar policies.
-//
-// It started as a port of a Python prototype (now archived outside this repo)
-// and was checked byte-for-byte against it before the prototype was retired;
-// FINDINGS.md lists the deliberate differences. The Go code is now the
-// reference implementation.
+// Package gcedar compiles gittuf-style JSON delegations into Cedar policies
+// and decides pushes with them: Compile (this file) turns a Doc into Cedar,
+// the Verifier's Phase A (verify.go) turns signatures into facts, and the
+// Evaluator's Phase B (phaseb.go) asks Cedar for the decision.
 package gcedar
 
 import (
@@ -72,16 +70,17 @@ func (d *Doc) defaultEffect() string {
 	return d.Default
 }
 
+// DelegationError is a document the compiler refuses.
 type DelegationError struct{ Msg string }
 
 func (e *DelegationError) Error() string { return e.Msg }
 
+// ExpansionTooLarge is returned when a threshold expands past MaxCombinations.
 type ExpansionTooLarge struct{ DelegationError }
 
 // DuplicateMemberError is returned when a threshold lists the same member twice.
-// The archived prototype accepted this and counted the member twice; gittuf
-// accepts it and counts it once (FINDINGS.md, Finding 4). Both are surprising,
-// so the compiler rejects it.
+// gittuf accepts such a rule and counts the member once, so the rule can never
+// be met (FINDINGS.md, Finding 4). The compiler rejects it instead.
 type DuplicateMemberError struct{ DelegationError }
 
 func checkDuplicates(members []string) error {
@@ -381,7 +380,7 @@ type Compiled struct {
 	HostFacts []string // boolean context facts, sorted
 }
 
-// Compile translates a delegation document into Cedar policies.
+// Compile turns a delegation document into strict-mode Cedar policies.
 func Compile(doc *Doc) (*Compiled, error) {
 	def := doc.defaultEffect()
 	if def != "allow" && def != "deny" {
@@ -442,6 +441,8 @@ func Compile(doc *Doc) (*Compiled, error) {
 			return nil, err
 		}
 		c.UsesNow = c.UsesNow || rule.Window != nil
+		// The except is scoped like this rule's permits (this rule matches and
+		// no earlier one does), so it applies only where this rule decides.
 		if rule.Except != nil {
 			users, err := principalList("rule "+rule.Name+": except", rule.Except, doc.Principals)
 			if err != nil {

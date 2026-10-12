@@ -80,14 +80,14 @@ async fn main() -> ExitCode {
     use Expect::*;
     use Kind::*;
     let queries = vec![
-        // ---- Proof 1 (gittuf mode): a broad rule weakens a narrow one ----
+        // Proof 1 (gittuf mode): a broad rule weakens a narrow one
         q("P1  [narrow+broad] allows only what [narrow] allows?  (broad refs/heads/* 1-of-{alice})",
           Implies, "p1_broad", "p1_narrow", false, Counterexample),
         q("P1  on refs/heads/main: [narrow] allows only what [narrow+broad] allows?",
           Implies, "p1_narrow", "p1_broad", true, Holds),
         q("P1  over ALL refs: [narrow] allows only what [narrow+broad] allows?",
           Implies, "p1_narrow", "p1_broad", false, Counterexample),
-        // ---- Proof 1 controls ----
+        // Proof 1 controls
         q("C1a disjoint rule (refs/heads/dev): on main, [narrow] == [narrow+dev]?",
           Equivalent, "p1_narrow", "p1_disjoint", true, Holds),
         q("C1b disjoint rule: [narrow+dev] allows only what [narrow] allows (no weakening anywhere)?",
@@ -100,17 +100,17 @@ async fn main() -> ExitCode {
           Implies, "p1_broad_higher", "p1_narrow", false, Holds),
         q("C1f broad, same threshold, other members (refs/heads/* 2-of-{alice,carol}): no weakening?",
           Implies, "p1_broad_same_k_other", "p1_narrow", false, Counterexample),
-        // ---- Proof 2 (strict mode): forbid_self_approval ----
+        // Proof 2 (strict mode): forbid_self_approval
         q("P2  with forbid_self_approval: no request with author in approvals is allowed?",
           Disjoint, "p2_forbid", AUTHOR_IN_APPROVALS, false, Holds),
         q("C2  without the forbid: no request with author in approvals is allowed?",
           Disjoint, "p2_noforbid", AUTHOR_IN_APPROVALS, false, Counterexample),
-        // ---- Proof 3 (strict mode): an except on main's rule ----
+        // Proof 3 (strict mode): an except on main's rule
         q("P3  main 1-of-{alice,mallory} except [mallory]: on main, no request with mallory among the signers is allowed?",
           Disjoint, "p3_except", MALLORY_SIGNED, true, Holds),
         q("C3  same rule without the except: on main, no request with mallory among the signers is allowed?",
           Disjoint, "p3_noexcept", MALLORY_SIGNED, true, Counterexample),
-        // ---- Proof 4 (strict mode): a time window on main's rule ----
+        // Proof 4 (strict mode): a time window on main's rule
         q("P4  main with not_after 2026-12-19T23:59:59Z: on main, no request with now after it is allowed?",
           Disjoint, "p4_window", AFTER_NOT_AFTER, true, Holds),
         q("C4  main without the window: on main, no request with now after 2026-12-19T23:59:59Z is allowed?",

@@ -5,9 +5,9 @@ import (
 	"time"
 )
 
-// GlobMatch reports whether ref matches pattern, where `*` matches any
-// sequence (including `/`) and every other character is literal. This is the
-// POC's assumed semantics, identical to Cedar's `like`.
+// GlobMatch reports whether ref matches a strict-mode pattern. The rules are
+// Cedar's `like`: `*` matches any sequence including `/`, and every other
+// character is literal.
 func GlobMatch(pattern, ref string) bool {
 	parts := strings.Split(pattern, "*")
 	if len(parts) == 1 {
@@ -94,12 +94,9 @@ func toSet(xs []string) map[string]bool {
 	return m
 }
 
-// ReferenceAllows is a direct (no Cedar, no expansion) implementation of the
-// strict-mode semantics (including forbid, except, window and require), by
-// backtracking search rather than set expansion. It is a sanity check for
-// the compiler, not an oracle for gittuf. A signer never counts toward two
-// members of the same threshold (the archived prototype's reference let one
-// signer satisfy two overlapping roles).
+// ReferenceAllows decides a strict-mode request by backtracking search, with
+// no Cedar and no threshold expansion. TestDifferential checks the compiler
+// against it. It is not a model of gittuf.
 func ReferenceAllows(doc *Doc, f Facts) bool {
 	approvals := toSet(f.Approvals)
 	if doc.ForbidSelfApproval && approvals[f.Author] {

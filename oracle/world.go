@@ -1,9 +1,6 @@
-// Package oracle materializes delegation documents as real gittuf policies in
-// throwaway Git repositories and asks gittuf's own verifier for a verdict.
-//
-// Everything goes through gittuf's public experimental/gittuf API (the same
-// code paths as the gittuf CLI): trust init, policy init, add-key, add-rule,
-// policy apply, rsl record, attest authorize, verify-ref.
+// Package oracle writes delegation documents as real gittuf policies in
+// throwaway Git repositories and asks gittuf's own verifier for a verdict,
+// through gittuf's public experimental/gittuf API (the CLI's code paths).
 package oracle
 
 import (
@@ -218,13 +215,9 @@ func (w *World) Apply() error {
 	return nil
 }
 
-// Push simulates an update of ref to a new commit:
-//  1. a new commit is made on a scratch feature branch and recorded in the RSL,
-//  2. each key in attestors signs a reference authorization for ref -> that commit,
-//  3. ref is fast-forwarded and an RSL entry for ref is recorded, signed by
-//     pusher (or unsigned if pusher is nil).
-//
-// It returns gittuf's verdict on the latest entry for ref (nil = allowed).
+// Push makes a commit on a scratch branch, has each attestor authorize ref ->
+// that commit, fast-forwards ref with an RSL entry signed by pusher (unsigned
+// if nil), and returns gittuf's verdict on that entry (nil = allowed).
 func (w *World) Push(ref string, pusher *Key, attestors []*Key) (error, error) {
 	return w.PushSigned(ref, pusher, attestors, nil)
 }

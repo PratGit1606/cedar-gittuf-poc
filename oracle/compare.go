@@ -25,11 +25,9 @@ func keyName(doc *gcedar.Doc, principal string) string {
 	return principal
 }
 
-// Materialize writes a flat (role-free) delegation doc into w's "targets" rule
-// file. A principal with a key of its own becomes a plain SSH-key principal
-// (ID = key ID); principals that share a key become tufv02 persons (ID = the
-// principal name) via the gittuf CLI. Rule patterns get gittuf's "git:"
-// prefix. Rule members are passed to gittuf verbatim, duplicates included.
+// Materialize writes a role-free doc into w's "targets" rule file. Principals
+// that share a key become tufv02 persons named after the principal; the rest
+// are plain SSH keys. Members are passed verbatim, duplicates included.
 func Materialize(w *World, doc *gcedar.Doc) error {
 	ids, err := gittufIDs(doc)
 	if err != nil {
@@ -114,10 +112,9 @@ func forMode(doc *gcedar.Doc, mode gcedar.Mode) (*gcedar.Doc, error) {
 	return &d, nil
 }
 
-// CedarVerdictMode runs a scenario through our compiler + cedar-go in a mode.
-// Phase A is simulated faithfully for the mode: strict mode reports the
-// principal names whose key signed; gittuf mode reports distinct key IDs and
-// the fnmatch-only patterns that match the ref.
+// CedarVerdictMode runs a scenario through the compiler and cedar-go. Phase A
+// is simulated per mode: strict mode reports the principal names whose key
+// signed; gittuf mode reports distinct key IDs and the fnmatch-only patterns.
 func CedarVerdictMode(doc0 *gcedar.Doc, mode gcedar.Mode, ref string, s Scenario) (bool, error) {
 	doc, err := forMode(doc0, mode)
 	if err != nil {

@@ -10,11 +10,9 @@ func classChar(r rune) bool {
 	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '/'
 }
 
-// LikeAlternatives rewrites an fnmatch pattern into a disjunction of Cedar
-// `like` patterns when that is exact: only `*`, literals and positive bracket
-// classes over [A-Za-z0-9._/-] (with a-z style ranges) are accepted. `?`,
-// negated classes ([!..], [^..]), escapes and anything else return ok=false:
-// `like` has no single-character wildcard, so those need Phase A matching.
+// LikeAlternatives rewrites an fnmatch pattern made of `*`, literals and
+// positive classes over [A-Za-z0-9._/-] into equivalent `like` patterns. `?`,
+// [!..] and escapes return ok=false: `like` has no one-character wildcard.
 func LikeAlternatives(p string, max int) (alts []string, ok bool) {
 	alts = []string{""}
 	rs := []rune(p)
@@ -29,7 +27,6 @@ func LikeAlternatives(p string, max int) (alts []string, ok bool) {
 			}
 			continue
 		}
-		// bracket class
 		j := i + 1
 		if j >= len(rs) || rs[j] == '!' || rs[j] == '^' || rs[j] == ']' {
 			return nil, false

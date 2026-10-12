@@ -11,7 +11,7 @@ func oneRule(pattern string, k int, members ...string) *gcedar.Doc {
 		Rules: []gcedar.Rule{{Name: "r", Pattern: pattern, Threshold: k, Members: members}}}
 }
 
-// Probe 2: pattern semantics end to end (`*` vs `/`, ?, [..], [!..]).
+// Pattern semantics end to end (`*` vs `/`, ?, [..], [!..]).
 func TestProbePatterns(t *testing.T) {
 	for _, c := range []struct {
 		pattern string
@@ -31,7 +31,7 @@ func TestProbePatterns(t *testing.T) {
 	}
 }
 
-// Probe 3: unprotected refs and default deny.
+// Unprotected refs and default deny.
 func TestProbeUnprotected(t *testing.T) {
 	doc := oneRule(main, 1, "alice")
 	ps := []push{{"refs/heads/other", "", nil}, {"refs/heads/other", "mallory", nil}}
@@ -47,7 +47,7 @@ func TestProbeUnprotected(t *testing.T) {
 	compareDoc(t, "catch-all * rule", &catchAll, append(ps, push{"refs/heads/other", "bob", nil}), ModesUnderTest...)
 }
 
-// Probe 4 (re-run in both modes): duplicate members and shared keys.
+// Duplicate members and shared keys, in both modes.
 func TestProbeDuplicatesModes(t *testing.T) {
 	ps := []push{{main, "alice", nil}, {main, "alice", []string{"bob"}}, {main, "bob", nil}}
 	compareDoc(t, "2-of-[alice,alice]", oneRule(main, 2, "alice", "alice"), ps, ModesUnderTest...)

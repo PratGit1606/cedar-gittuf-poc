@@ -38,7 +38,7 @@ func verdict(t *testing.T, label string, run func() (error, error)) bool {
 	return verr == nil
 }
 
-// Probe 5: for git: rules, which signature counts, the commit's or the RSL entry's?
+// For git: rules, which signature counts, the commit's or the RSL entry's?
 func TestProbeCommitVsRSLSignature(t *testing.T) {
 	k := keys(t, "alice", "mallory")
 	alice, mallory := k[0], k[1]
@@ -63,15 +63,14 @@ func TestProbeCommitVsRSLSignature(t *testing.T) {
 	}
 }
 
-// Probe 6: delegated rule files (gittuf's closest analogue to our roles).
+// Delegated rule files (gittuf's closest analogue to our roles).
 func TestProbeDelegatedRuleFile(t *testing.T) {
 	k := keys(t, "alice", "bob", "carol", "dave")
 	alice, bob, carol, dave := k[0], k[1], k[2], k[3]
 
-	// targets: rule "team" (main, 2-of-{alice,bob}) delegates to rule file
-	// "team", whose own rule "team-main" is main 2-of-{carol,dave}. A second
-	// top-level rule protects refs/heads/other with 1-of-{bob}. The team file
-	// also has a rule for "*" by carol, outside the delegator's namespace.
+	// Rule "team" (main, 2-of-{alice,bob}) delegates to file "team", whose rule
+	// "team-main" is main 2-of-{carol,dave}; "other" is 1-of-{bob}. The team
+	// file also has a "*" rule for carol, outside the delegator's namespace.
 	setup := func(withAnything bool) *World {
 		w, err := NewWorld(t.TempDir())
 		if err != nil {

@@ -8,7 +8,7 @@ import (
 
 const main = "refs/heads/main"
 
-// Probe 1: are matching rules alternatives (gittuf, per source reading) or is
+// Are matching rules alternatives (gittuf, per source reading) or is
 // the first matching rule final (our strict compiler)?
 func TestProbeRuleMatching(t *testing.T) {
 	ps := principals("alice", "bob", "carol")

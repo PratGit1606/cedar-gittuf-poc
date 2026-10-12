@@ -10,8 +10,7 @@ import (
 	"testing"
 )
 
-// Signed-field cases (carried over from the archived prototype's tests),
-// plus count-once paths.
+// Signed-field cases, plus count-once paths.
 
 var fw = makeWorld("k1", "k2", "k3")
 

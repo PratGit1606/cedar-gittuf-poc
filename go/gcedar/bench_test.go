@@ -7,15 +7,9 @@ import (
 	"time"
 )
 
-// How badly does threshold expansion blow up, and what does
-// it cost per request? Run with:
-//
-//	go test ./gcedar -run '^$' -bench Expansion -benchtime 300x
-//
-// Metrics per config: candidates (upper bound before minimization), permits,
-// KB of Cedar text, compile-ms, and ns/op = one Phase B authorization. As in
-// the original benchmark, per-request latency is only measured up to 20,000 permits; flat
-// configs must produce exactly C(n,k) permits.
+// The expansion benchmark measures how threshold expansion grows and what one
+// Phase B decision costs, up to 20,000 permits. Flat configs must give exactly
+// C(n,k) permits. Run: go test ./gcedar -run '^$' -bench Expansion -benchtime 300x
 
 type benchConfig struct {
 	label string

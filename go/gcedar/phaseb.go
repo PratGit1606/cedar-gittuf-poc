@@ -24,10 +24,9 @@ type Facts struct {
 	// MatchedPatterns (gittuf mode only) lists the rule patterns Cedar cannot
 	// match itself that match Ref; see MatchedPatterns.
 	MatchedPatterns []string
-	// Now and Host are host facts for strict-mode windows and require
-	// conditions (Compiled.UsesNow, Compiled.HostFacts). Cedar trusts them: Now
-	// comes from the host clock, not from anything the signer controls. A
-	// missing host fact is false.
+	// Now and Host feed strict-mode windows and require conditions. Cedar
+	// trusts them: Now comes from the host clock, never from a timestamp the
+	// signer controls, and a missing Host fact is false.
 	Now  time.Time
 	Host map[string]bool
 }

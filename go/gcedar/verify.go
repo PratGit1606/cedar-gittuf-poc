@@ -9,13 +9,9 @@ import (
 	"time"
 )
 
-// Two-phase verifier, strict mode.
-//
-// Phase A (host): everything Cedar must never do itself - parse untrusted
-// data, verify ed25519 signatures, interpret forge review data. Its output is
-// plain facts: which principals verifiably signed, which approvals are fresh.
-//
-// Phase B (Cedar): given those facts as request context, decide.
+// Phase A runs on the host and does what Cedar must never do: parse untrusted
+// input, verify ed25519 signatures and read forge data. Its output is plain
+// facts (who validly signed, which approvals are fresh) for Phase B.
 
 // RSLPayload is the byte string a principal signs to authorize ref -> commit.
 // It is this POC's own encoding, not gittuf's RSL entry format.
@@ -149,10 +145,9 @@ func checkSharedKeys(keys map[string]string, noun string) error {
 	return nil
 }
 
-// Candidates is the lazy-verification prefilter: only principals named
-// (directly or through roles) by rules whose pattern matches ref, plus the
-// principals of matching excepts and forbids (a forbid can only fire on a
-// signature that was verified).
+// Candidates lists the principals whose signatures are worth verifying for
+// ref: members of matching rules (through roles), plus matching excepts and
+// forbids, because a forbid only fires on a signature that was verified.
 func (v *Verifier) Candidates(ref string) []string {
 	out := map[string]bool{}
 	var walk func(m string, seen map[string]bool)

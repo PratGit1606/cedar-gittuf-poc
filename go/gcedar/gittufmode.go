@@ -12,29 +12,14 @@ import (
 type Mode string
 
 const (
-	// ModeStrict is the POC's original semantics (those of the archived
-	// prototype, except where FINDINGS.md says otherwise): the first matching rule decides, configurable default,
-	// principals are names, roles and approvals are supported. It is the
-	// "what Cedar could do" variant and is NOT gittuf's semantics.
+	// ModeStrict is this project's own semantics, not gittuf's: the first
+	// matching rule decides, the default is configurable, principals are names,
+	// and roles, approvals and the strict-only fields are supported.
 	ModeStrict Mode = "strict"
 
-	// ModeGittuf mirrors gittuf's verifier at the commit recorded in
-	// FINDINGS.md:
-	//   - every rule whose pattern matches is an alternative; any one met allows
-	//   - refs no rule matches are unprotected and allowed (no default deny)
-	//   - principals are identified by key ID, so a key counts at most once and
-	//     principals sharing a key collapse
-	//   - a member listed twice is rejected (deliberate deviation: gittuf
-	//     accepts it and the rule can never be met, FINDINGS.md Finding 4)
-	//   - a rule whose distinct keys are fewer than its threshold because two
-	//     listed principals share a key is accepted but can never be met, as
-	//     in gittuf; Compiled.Warnings reports it
-	//   - patterns are fnmatch globs; positive bracket classes are rewritten to a
-	//     bounded disjunction of `like` patterns; patterns with no exact `like`
-	//     form (?, negated classes, escapes) are matched by the host (Phase A)
-	//     and passed in as context.matchedPatterns
-	// Roles, approvals and forbid_self_approval have no direct gittuf
-	// equivalent and are rejected.
+	// ModeGittuf mirrors gittuf's verifier at the commit in FINDINGS.md: any
+	// matching rule may allow, unmatched refs are allowed, and a principal is
+	// its key ID. FINDINGS.md "Two compile modes" lists every difference.
 	ModeGittuf Mode = "gittuf"
 )
 

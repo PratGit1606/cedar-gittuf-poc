@@ -7,11 +7,9 @@ import (
 	"github.com/pratham/gcedar/gcedar"
 )
 
-// Can a nested threshold (our roles) be written in gittuf? Because gittuf
-// rules are alternatives, the compiler's own expansion (one minimal approver
-// set per permit) can be materialized as one gittuf rule per set with
-// threshold = |set|. Compare gittuf on every signer subset against strict-mode
-// Cedar on the original role document.
+// Roles can be written in gittuf as one rule per minimal approver set with
+// threshold = |set|, because gittuf rules are alternatives. Compare that on
+// every signer subset with strict-mode Cedar on the role document.
 func TestRolesAsExpandedGittufRules(t *testing.T) {
 	names := []string{"alice", "bob", "carol", "dave", "erin"}
 	for _, doc := range []*gcedar.Doc{

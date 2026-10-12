@@ -8,10 +8,9 @@ import (
 	"testing"
 )
 
-// Cedar (via cedar-go) must agree with the Go reference on every input. This
-// only checks the port against its own spec; the gittuf oracle is in ../oracle.
-// The first 150 documents are the original generator's; the next 150 add
-// forbid, except, window and require (features.go) with their own seed.
+// Cedar (via cedar-go) must agree with ReferenceAllows on every input. This
+// checks the compiler against its own spec; ../oracle compares with gittuf.
+// Seed 1609 draws plain documents; seed 2026 adds except, forbid, window, require.
 func TestDifferential(t *testing.T) {
 	plain := differential(t, rand.New(rand.NewSource(1609)), false)
 	feat := differential(t, rand.New(rand.NewSource(2026)), true)

@@ -13,21 +13,10 @@ import (
 	"github.com/cedar-policy/cedar-go"
 )
 
-// Signed fields: "field X must be signed by a
-// threshold of keys in set Y".
-//
-// A document is a set of fields, each carrying signatures. Phase A verifies the
-// signatures over a canonical encoding of (field name, value) and builds one
-// Cedar Field entity per field whose `signers` attribute holds only keys that
-// verified. Phase B asks Cedar whether each field is accepted. The document is
-// accepted iff every field is accepted and every field the policy requires is
-// present (the loop over fields is host-side; Cedar has no loops).
-//
-// Policy document:
-//
-//	{"keys": {"k1": "<pubkey hex>", ...},
-//	 "fields": {"expires": {"threshold": 1, "keys": ["k1", "k2"]},
-//	            "targets": {"threshold": 2, "keys": ["k1", "k2", "k3"]}}}
+// Signed fields: "field X must be signed by k of the keys in Y". Phase A
+// verifies each field's signatures over Canonical(name, value); Phase B asks
+// Cedar about each field. The host accepts a document only if every field
+// passes and no required field is missing, because Cedar has no loops.
 
 // FieldSchema is the Cedar schema for field policies.
 const FieldSchema = `entity Doc;
@@ -86,8 +75,7 @@ type FieldDoc struct {
 // integers in decimal, floats in shortest round-trip form (reprFloat).
 // Supported values: nil, bool, string, int, int64, float64, json.Number,
 // []any, map[string]any. Known limit: integers beyond 64 bits are encoded via
-// float64 and lose precision. (The format was chosen to match the archived
-// prototype, and was checked against it before the prototype was retired.)
+// float64 and lose precision.
 func Canonical(name string, value any) ([]byte, error) {
 	var b strings.Builder
 	if err := canon(&b, []any{name, value}); err != nil {

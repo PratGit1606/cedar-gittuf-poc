@@ -10,10 +10,9 @@ import (
 	"github.com/cedar-policy/cedar-go"
 )
 
-// One test per row of CAPABILITIES.md (rows that reuse an existing test say
-// so in the matrix). Every row evaluates compiler output, which NewEvaluator
-// validates against its schema with cedar-go's validator; only the
-// schema-validation row feeds the validator deliberately broken policies.
+// One test per row of CAPABILITIES.md. Every row evaluates compiler output,
+// which NewEvaluator validates against its schema, except the
+// schema-validation row, which feeds the validator broken policies on purpose.
 
 func gittufCompiled(t *testing.T, doc *Doc) *Compiled {
 	t.Helper()
@@ -131,10 +130,9 @@ func TestCapForbidOverridesPermit(t *testing.T) {
 	}
 }
 
-// Row: rule exceptions (compiler output, strict mode). Ref exception: "all of
-// refs/heads/* except main" comes from first-match order (main's rule is
-// listed first, so the broad rule's permits carry !(main)). Principal
-// exception: "except" on the broad rule, scoped to the refs that rule decides.
+// Row: rule exceptions (strict mode). The ref exception comes from first-match
+// order: main's rule is first, so the broad rule's permits carry !(main). The
+// principal exception is "except" on the broad rule.
 func TestCapRuleExceptions(t *testing.T) {
 	doc := &Doc{Principals: keyed("alice", "bob", "carol", "mallory"), Rules: []Rule{
 		{Name: "main", Pattern: "refs/heads/main", Threshold: 2, Members: []string{"bob", "carol"}},

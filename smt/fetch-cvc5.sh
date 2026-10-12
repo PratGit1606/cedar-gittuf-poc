@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Download cvc5 into smt/.tools/cvc5-$VERSION/ (gitignored) and print its path.
-# VERSION defaults to 1.2.1 (requested); the symcc 0.7.0 README names 1.3.1.
+# CVC5_VERSION defaults to 1.2.1; the symcc 0.7.0 README names 1.3.1, which also works.
 set -euo pipefail
 VERSION=${CVC5_VERSION:-1.2.1}
 here=$(cd "$(dirname "$0")" && pwd)

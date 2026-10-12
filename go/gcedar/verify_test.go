@@ -8,8 +8,7 @@ import (
 	"testing"
 )
 
-// Verifier cases (carried over from the archived prototype's tests), plus the
-// shared-key path.
+// Verifier cases, plus the shared-key path.
 
 type world struct {
 	sk map[string]ed25519.PrivateKey
@@ -56,7 +55,8 @@ func newTestVerifier(t *testing.T) *Verifier {
 	return v
 }
 
-// change mirrors test_verifier.change: signers sign (ref, signCommit or commit).
+// change builds a Change in which signers sign (ref, signCommit), or (ref,
+// commit) when signCommit is empty.
 func change(signers []string, commit, ref, signCommit string) *Change {
 	if commit == "" {
 		commit = vC1
@@ -142,7 +142,6 @@ func TestSharedKeyRejected(t *testing.T) {
 	}
 }
 
-// --- forge data -------------------------------------------------------
 
 const forgeRef = "refs/heads/feature/x"
 

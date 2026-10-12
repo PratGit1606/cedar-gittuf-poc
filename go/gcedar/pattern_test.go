@@ -84,13 +84,9 @@ func TestBracketRewriteMatchesFnmatch(t *testing.T) {
 	}
 }
 
-// `?` and negated classes cannot be expressed by any single `like` pattern:
-// exhaustive search over every like pattern up to length 7 on the alphabet
-// that occurs in the corpus finds none that reproduces fnmatch's verdicts.
-// (General argument for `rel-?`: a pattern matching both rel-1 and rel-2 must
-// put a `*` over the last character, since they differ there; whatever
-// follows that `*` must be a common suffix of "1" and "2", i.e. empty, so the
-// pattern also matches rel-10.)
+// `?` and negated classes have no `like` equivalent: a search over every like
+// pattern up to length 7 finds none with fnmatch's verdicts. (rel-1 and rel-2
+// force a trailing `*`, which also matches rel-10.)
 func TestLikeCannotExpressQuestionMark(t *testing.T) {
 	cases := map[string][]string{
 		"rel-?":    {"rel-1", "rel-2", "rel-0", "rel-10", "rel-", "rel-12", "re-1", "rel-11", "rel-21"},

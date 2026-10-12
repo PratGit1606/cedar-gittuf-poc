@@ -9,25 +9,9 @@ import (
 	"time"
 )
 
-// Strict-mode-only rule features: forbids and exceptions, time windows, and
-// boolean host facts. A document that uses none of them compiles to exactly
-// the same Cedar and schema as before they existed.
-//
-//   - "except": [p...] on a rule, and top-level "forbid": [{name, pattern,
-//     principals}], compile to `forbid` policies: deny when the ref matches and
-//     context.signers.containsAny([p...]). Cedar's forbid overrides every
-//     permit. An except is scoped like the rule's permits (ref matches the
-//     rule and no earlier rule), so it applies exactly where the rule decides;
-//     a top-level forbid applies to every matching ref.
-//   - "window": {not_before, not_after} (RFC 3339, either optional, both
-//     inclusive) adds context.now comparisons to the rule's permits, so
-//     outside the window the rule allows nothing. context.now is a host fact:
-//     Cedar trusts the host clock (Facts.Now), not any signed timestamp.
-//   - "require": {"ci_passed": true} adds context.ci_passed == true to the
-//     rule's permits. Facts are booleans the host computes (Facts.Host);
-//     a missing fact is false.
-//
-// gittuf cannot express any of these, so gittuf mode rejects them.
+// Strict-mode extensions: except, top-level forbid, window and require.
+// gittuf cannot express them, so gittuf mode rejects them. A document without
+// them compiles to the same Cedar and schema as if this file did not exist.
 
 // Window bounds when a rule may allow. Both bounds are inclusive.
 type Window struct {
@@ -125,7 +109,8 @@ func cedarDatetime(where, s string) (string, time.Time, error) {
 }
 
 // ruleConditions validates a rule's window and require and returns the extra
-// Cedar conditions for its permits (each starting with " && ").
+// conditions for each of its permits (each starting with " && "). Outside the
+// window, or with a required fact false, the rule allows nothing.
 func ruleConditions(r Rule, facts map[string]bool) (string, error) {
 	var b strings.Builder
 	if w := r.Window; w != nil {
@@ -188,7 +173,8 @@ func extendSchema(usesNow bool, facts []string) string {
 	return strings.Replace(Schema, "author: User }", "author: User"+extra+" }", 1)
 }
 
-// compileForbids emits one forbid per top-level forbid entry.
+// compileForbids emits one forbid per top-level forbid entry. Unlike an
+// except, it applies to every ref its pattern matches.
 func compileForbids(doc *Doc, emit func(kind, body string, m PolicyMeta)) error {
 	if doc.Forbid == nil {
 		return nil
