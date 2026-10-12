@@ -1,11 +1,5 @@
 # Findings: Cedar compiler vs real gittuf
 
-> A note on "the prototype" below: the project began as a prototype in another
-> language. Its behaviour was ported to Go and checked byte for byte against
-> it, and the prototype was then retired and archived outside this repository.
-> Mentions of the prototype, its Phase A and its tests are history. The Go
-> code is the reference implementation.
-
 ## Oracle under test
 
 | | |
