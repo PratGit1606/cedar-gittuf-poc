@@ -10,13 +10,13 @@ analyzer, could decide those policies instead of gittuf's own Go code.
 
 One push goes through four steps:
 
-1. **Write a delegation** (JSON): who the principals are and which rules
+1. Write a delegation (JSON): who the principals are and which rules
    protect which refs.
-2. **Compile it** to Cedar policies (`gcedar compile`). Each k-of-n rule
+2. Compile it to Cedar policies (`gcedar compile`). Each k-of-n rule
    becomes one `permit` per minimal set of signers.
-3. **Phase A, on the host:** verify the push's signatures and read forge data.
+3. Phase A, on the host: verify the push's signatures and read forge data.
    The result is plain facts, such as "alice and bob validly signed".
-4. **Phase B, in Cedar:** given only those facts, Cedar allows or denies and
+4. Phase B, in Cedar: given only those facts, Cedar allows or denies and
    reports which policies fired.
 
 This delegation says that `main` needs both alice and bob:
@@ -34,9 +34,9 @@ permit(principal, action == Action::"write", resource) when { resource.name like
 ```
 
 Cedar never sees a key or a signature. That keeps it small enough to analyze,
-but **Cedar trusts whatever Phase A tells it**.
+but Cedar trusts whatever Phase A tells it.
 
-## Run it
+## Running it
 
 Requirements: Go 1.27+, git and ssh-keygen. The proofs also need Rust 1.89 or
 newer, curl and unzip.
@@ -59,7 +59,7 @@ cd .. && smt/run.sh                        # set CARGO=/path/to/cargo if your Ru
 ```
 
 `oracle/setup.sh` puts the gittuf checkout in `.gittuf-oracle/` (gitignored).
-Set `GITTUF=/some/dir` to put it elsewhere. If you run the oracle tests
+Set `GITTUF=/some/dir` in case you want to put it elsewhere. If you run the oracle tests
 before `setup.sh`, Go stops with `replacement directory ../.gittuf-oracle does
 not exist`. Run `oracle/setup.sh` first.
 
@@ -71,12 +71,11 @@ not exist`. Run `oracle/setup.sh` first.
 | `go/cmd/gcedar/` | CLI: `gcedar compile [-mode strict\|gittuf] [-out dir] doc.json`, `gcedar demo` |
 | `oracle/` | Harness that runs real gittuf and compares its verdicts with ours; `setup.sh` pins the gittuf checkout |
 | `smt/` | Rust crate with the four SMT proofs (`cedar-policy-symcc` and cvc5); `run.sh` runs them end to end |
-| `repro/` | Stand-alone shell reproducer for the gittuf duplicate-member lockout |
 | `FINDINGS.md` | What the comparison with gittuf found, with reproducers |
 | `CAPABILITIES.md` | What gittuf, GitHub and Cedar can each express, one test per row |
 | `PROOFS.md` | What the SMT proofs show, their controls and their assumptions |
 
-**Compile modes.** *Strict* mode is this project's own design: the first
+There are two compile modes. *Strict* mode is this project's own design: the first
 matching rule decides, with an optional default deny, roles and approvals.
 *Gittuf* mode copies gittuf's behaviour: any matching rule may allow,
 unprotected refs are allowed, and keys count once. The oracle checks gittuf
@@ -84,56 +83,56 @@ mode.
 
 ## Known limits
 
-* **Host facts are trusted.** Cedar decides only from what Phase A reports.
+* Host facts are trusted: Cedar decides only from what Phase A reports.
   Neither the tests nor the proofs check signature verification, key handling
   or forge data inside Cedar; they rely on the Go Phase A being right. The
   same goes for the clock behind `window` and the facts behind `require`: a
   wrong clock defeats a time window.
-* **Proofs cover the compiled policies, not the compiler.** Each proof is
+* The proofs cover the compiled policies, not the compiler. Each proof is
   about the Cedar produced for the specific documents in `smt/docs/`. That the
   compiler is correct in general is tested (differential tests, gittuf
   oracle), not proven.
-* **Some patterns cannot be expressed in Cedar.** gittuf patterns with `?` or
+* Some patterns cannot be expressed in Cedar: gittuf patterns with `?` or
   `[!…]` have no Cedar `like` equivalent, so the host matches them and passes
   the result in. The solver treats that input as arbitrary.
-* **Threshold expansion grows fast.** k-of-n becomes C(n,k) Cedar policies.
+* Threshold expansion grows fast: k-of-n becomes C(n,k) Cedar policies.
   8-of-16 is 12,870 policies (~16 ms per decision); expansions above 200,000
   candidates are refused.
-* **gittuf coverage is partial.** The comparison covers ref rules with SSH keys
+* gittuf coverage is partial. The comparison covers ref rules with SSH keys
   and reference authorizations. It does not cover GitHub app approvals, file
-  rules, tags, or full-history verification (list in FINDINGS.md).
+  rules, tags, or full-history verification (list in FINDINGS.md). That is something I hope to try to test out soon as well.
 
 ## Results
 
-* **Compiler vs reference:** on 300 random policy documents (150 of them
+* Compiler vs reference: on 300 random policy documents (150 of them
   using the strict-mode fields below), the compiled Cedar agrees with an
-  independent Go reference implementation on all **356,636** decisions.
+  independent Go reference implementation on all 356,636 decisions.
   Breaking the compiler in one place per new field makes this test fail.
-* **Compared with real gittuf:** a harness builds real gittuf repositories
+* Compared with real gittuf: a harness builds real gittuf repositories
   with real SSH signatures and runs gittuf's own verifier. In *gittuf mode*
-  the compiler agrees with gittuf on **every** compared push: 0 disagreements
+  the compiler agrees with gittuf on every compared push: 0 disagreements
   in 1,568 pushes over 300 random documents, plus targeted probes. Documents
-  that list a member twice are rejected by us on purpose and are not compared
+  that list a member twice are rejected on purpose and are not compared
   (FINDINGS.md). Last run 2026-10-12 at repo commit `52bb4af` against
   gittuf `0b0278ec`, on a fresh clone from `oracle/setup.sh`.
-* **Four SMT proofs (cvc5):** (1) adding a broad rule such as
-  `refs/heads/* 1-of-{alice}` provably weakens a stricter rule on `main`;
+* Four SMT proofs (cvc5): (1) adding a broad rule such as
+  `refs/heads/* 1-of-{alice}` weakens a stricter rule on `main`;
   (2) with the self-approval ban, no request where the author approved their
   own change is ever allowed; (3) with `"except": ["mallory"]` on main's
   rule, no request on main that mallory signed is allowed; (4) with a
   `not_after` on main's rule, no request on main after that time is allowed.
   Each has a control that makes the solver produce a counterexample.
-* **Capability matrix:** 12 capabilities (thresholds, globs, forbid rules,
+* Capability matrix: 12 capabilities (thresholds, globs, forbid rules,
   time windows, field signing and more), each with a test of compiler output,
   compared with what gittuf and GitHub can express today.
-* **Findings:** in gittuf every matching rule is an alternative, so a broad
+* Findings: in gittuf every matching rule is an alternative, so a broad
   rule always weakens a narrow one; gittuf accepts a rule that lists a member
-  twice and then locks the branch forever (reproducer in `repro/`); and a
+  twice and then locks the branch forever; and a
   shared-key bug in the original Phase A.
 
 ## Strict-mode fields
 
-In **strict mode only**, a rule may also carry the fields below, and the
+In strict mode only, a rule may also carry the fields below, and the
 document may have top-level `forbid` entries. gittuf cannot express any of
 them, so gittuf mode rejects them with an error. A document that uses none of
 them compiles to exactly the same Cedar as one written before they existed.
@@ -161,7 +160,3 @@ rejected when the JSON is parsed (`ParseDoc`, which the CLI uses).
 * [CAPABILITIES.md](CAPABILITIES.md): the capability matrix and its evidence
   labels.
 * [PROOFS.md](PROOFS.md): the four SMT proofs, their controls and assumptions.
-
-The project began as a prototype in another language. Its behaviour was ported
-to Go and checked byte for byte against it; the prototype is archived outside
-this repository, and the Go code is the reference implementation.

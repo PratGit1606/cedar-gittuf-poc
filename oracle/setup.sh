@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Set up the gittuf checkout the oracle tests and repro/ scripts run against.
+# Set up the gittuf checkout the oracle tests run against.
 #
 #   oracle/setup.sh                 # clone into <repo>/.gittuf-oracle (gitignored)
 #   GITTUF=/some/dir oracle/setup.sh  # clone there, and link <repo>/.gittuf-oracle to it
