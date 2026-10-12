@@ -1,12 +1,10 @@
 # Findings: Cedar compiler vs real gittuf
 
-> **About "Python" below.** This POC began as a Python prototype
-> (`gcedar/compile.py`, `verify.py`, `fields.py`, …). Its behaviour was
-> ported to Go and checked byte for byte against it, and the prototype was
-> then retired. It is archived outside this repository. Mentions of Python
-> files, the Python Phase A, or tests such as `TestPythonByteCompat` below are
-> history: those files and tests no longer exist here, and the Go code is the
-> reference implementation.
+> **About "the prototype" below.** The project began as a prototype in another
+> language. Its behaviour was ported to Go and checked byte for byte against
+> it, and the prototype was then retired and archived outside this repository.
+> Mentions of the prototype, its Phase A and its tests are history. The Go
+> code is the reference implementation.
 
 ## Oracle under test
 
@@ -41,14 +39,15 @@ On the Cedar side, Phase A is simulated for each mode: the set of principals,
 or in gittuf mode the set of distinct key IDs, whose key signed the RSL entry
 or the attestation.
 
-Run with: `oracle/setup.sh`, then `cd oracle && go test -v .` (`ORACLE_DOCS=300` for the large random
-run, `ORACLE_DEBUG=1` for gittuf's own trace).
+Run with: `oracle/setup.sh`, then `cd oracle && go test -v .`. Set
+`ORACLE_DOCS=300` for the large random run and `ORACLE_DEBUG=1` for gittuf's
+own trace.
 
 ## Two compile modes
 
-`go/gcedar` now has two modes (`CompileMode`). Strict mode is the original
-semantics; it was byte-identical to the prototype's `compile.py` except for
-the deliberate differences recorded under "Go change 1" below.
+`go/gcedar` has two modes (`CompileMode`). Strict mode is the original
+semantics. It was byte-identical to the prototype's compiler except for the
+deliberate differences under "Go change 1" below.
 
 | | `strict` (the original POC) | `gittuf` (mirrors the commit above) |
 |---|---|---|
@@ -79,20 +78,20 @@ Gittuf mode's schema is `context: { signers: Set<User>, matchedPatterns: Set<Str
 What the random documents contain: 41 have two principals sharing a key, 104
 list a member twice, and 144 use a pattern that needs Phase A. Of the 2,400
 pushes, gittuf allowed 1,270. "Not compared" means the document lists a
-member twice and the Go compiler rejects it by design (Finding 4). The random row is from the run of
-2026-10-12 (repo commit `52bb4af`, gittuf `0b0278ec`, fresh `oracle/setup.sh`
-clone, `ORACLE_DOCS=300`, 13/13 oracle tests passed in 666 s). The previous
-version of this row compared all 2,400 strict-mode pushes, including those on
-documents that list a member twice, and showed 1,575 differences (39
-semantic).
+member twice and the Go compiler rejects it by design (Finding 4). The random
+row comes from the run of 2026-10-12 (repo commit `52bb4af`, gittuf
+`0b0278ec`, fresh `oracle/setup.sh` clone, `ORACLE_DOCS=300`, 13/13 oracle
+tests passed in 666 s). An earlier version of this row compared all 2,400
+strict-mode pushes, including those on documents that list a member twice,
+and showed 1,575 differences (39 semantic).
 
 **The oracle catches errors (mutation check).** I broke gittuf mode on purpose
 and reran 100 random documents:
 * Without key dedup, 13 of 800 verdicts disagreed with gittuf.
 * With Phase A never reporting pattern matches, 43 of 800 disagreed.
 
-Both mutations were reverted. Strict mode is effectively the "first match wins"
-mutant, and it disagrees too.
+Both mutations were reverted. Strict mode acts as a third mutant ("first match
+wins"), and it disagrees too.
 
 **What this does and does not show.** Gittuf mode agrees with gittuf's
 `verify-ref --latest-only` on flat documents built from these features: `git:`
@@ -142,15 +141,15 @@ Repro: `TestProbeRuleMatching`. Principals alice, bob and carol; every push is t
 | [main 2-of-{b,c}, heads/* 1-of-{a}] | alice | bob | allow | **deny** | allow |
 
 The other 10 pushes agree in all three. Classification: **(a) our semantics
-model was wrong**, now covered by gittuf mode.
+model was wrong**. Gittuf mode covers it.
 
 Consequence for the design: in gittuf a broad rule always weakens a narrower
 one, whatever their order. Last row: `main` is "protected" by 2-of-{bob, carol},
 but alice alone may push to it because `refs/heads/*` trusts her. Tightening
 a sub-namespace takes a terminating rule that has its own delegated rule file
-(see above), which the CLI cannot currently create. Strict mode shows Cedar can
-express both behaviours. Which one gittuf wants is a gittuf design question,
-not a Cedar limitation.
+(see above), which the CLI cannot create at this commit. Strict mode shows
+Cedar can express both behaviours. Which one gittuf wants is a gittuf design
+question, not a Cedar limitation.
 
 ## Finding 2: patterns
 
@@ -188,10 +187,10 @@ Can Cedar's `like` express what gittuf accepts?
   treats "does this pattern match this ref" as an unconstrained input.
 
 Classification: **(b) Cedar limitation** for `?` and negated classes. **(a) Our
-model was too narrow** for positive classes, which are now handled. One fnmatch
-quirk to note: a class that starts with `]` (`[]a]`) is parsed as empty instead
-of as a literal `]`. Phase A uses the same library, so gittuf mode reproduces
-that quirk by construction.
+model was too narrow** for positive classes; gittuf mode handles them. One
+fnmatch quirk: a class that starts with `]` (`[]a]`) is parsed as empty
+instead of as a literal `]`. Phase A uses the same library, so gittuf mode
+reproduces that quirk by construction.
 
 ## Finding 3: unprotected refs and default deny
 
@@ -244,27 +243,27 @@ standalone CLI script `repro/gittuf-duplicate-members-lockout.sh`.
   It needs only `git`, `ssh-keygen`, and either Go (to build gittuf from the checkout) or a gittuf CLI.
 * **(a) Our model was wrong in strict mode:** it counted a duplicated member once
   per listing, which quietly lowers the threshold.
-* **Resolution (Go change 1):** the Go compiler now **rejects** a member
-  listed twice, in both modes, with `DuplicateMemberError`. This is a
-  deliberate difference from both Python (which counts twice) and gittuf
-  (which accepts the rule and locks the namespace). The oracle reports such
-  documents as "not compared (rejected by design)": after this change, the
+* **Resolution (Go change 1):** the Go compiler **rejects** a member listed
+  twice, in both modes, with `DuplicateMemberError`. This deliberately
+  differs from the prototype (which counted twice) and from gittuf (which
+  accepts the rule and locks the namespace). The oracle reports such
+  documents as "not compared (rejected by design)". With this change, the
   300-document run compared 1,568 gittuf-mode verdicts with 0 disagreements,
   and 832 were not compared.
 
 ## Finding 5: principals sharing a key (bug in our Phase A)
 
 Repro: `TestProbeSharedKey`, `TestProbeDuplicatesModes`. p1 and p2 are two
-tufv02 persons with the same SSH key; p3 (carol) has her own key.
+tufv02 persons with the same SSH key; p3 (carol) has a key of its own.
 
-| Rule | What was signed | gittuf | strict (Python-style Phase A) | gittuf mode |
+| Rule | What was signed | gittuf | strict (prototype-style Phase A) | gittuf mode |
 |---|---|---|---|---|
 | 2-of-[p1, p2, p3] | RSL entry by the shared key | deny | **allow** | deny |
 | 2-of-[p1, p2, p3] | RSL entry and attestation by the shared key | deny | **allow** | deny |
 | 2-of-[p1, p2, p3] | shared key + carol | allow | allow | allow |
 | 2-of-[p1, p2] | RSL entry by the shared key | deny | **allow** | deny |
 
-The prototype's Python Phase A (`gcedar/verify.py`, now archived), run with p1 and p2 sharing a key:
+The prototype's Phase A (archived), run with p1 and p2 sharing a key:
 ```
 one signature, filed under p1 only       signers=['p1'] allowed=False
 same signature filed under p1 and p2     signers=['p1', 'p2'] allowed=True
@@ -297,7 +296,7 @@ rules. Our model agrees by construction, because Phase A only collects RSL entry
 and authorization signers. For the design doc: "who signed the commit" is a
 different fact from "who authorized the ref update", and a Cedar context
 should keep them separate (e.g. `context.commitSigners` vs `context.signers`).
-Classification: none (agreement), recorded because the task asked for it.
+Classification: none (agreement).
 
 ## Finding 7: delegated rule files are an OR across levels (our roles are not)
 
@@ -318,8 +317,8 @@ is refs/heads/other 1-of-{bob}.
 
 Our "roles" are nested thresholds (e.g. 2-of-[alice, @team]), which require
 signatures from several levels together. gittuf delegation is the opposite
-shape: each level is a complete alternative. As instructed, roles are not
-forced onto delegated rule files.
+shape: each level is a complete alternative. Roles are not mapped onto
+delegated rule files.
 
 However, roles are **not** beyond gittuf's expressive power.
 `TestRolesAsExpandedGittufRules` writes the compiler's expansion (one minimal
@@ -332,7 +331,9 @@ semantics.
 
 ## Minor
 
-* The prototype's `compile.py` crashed on `"rules": null` (`TypeError`). It was never fixed; the prototype is archived. The Go compiler treats it as no rules.
+* The prototype's compiler crashed on `"rules": null` with a type error. It
+  was never fixed; the prototype is archived. The Go compiler treats it as no
+  rules.
 * `TestRandomAgainstGittuf` takes about 30 s for 40 documents and about 4 min for
   300 (4 in parallel). One gittuf world takes about 0.3 to 1 s, or about 3 s
   with CLI-created persons.
@@ -345,14 +346,14 @@ semantics.
 | 2a | `?`, `[!..]` patterns | (b) Cedar limitation | Phase A matching (`context.matchedPatterns`) |
 | 2b | `[ab]` patterns | (a) model too narrow | bounded `like` OR in gittuf mode |
 | 3 | Default deny | (a) model | gittuf mode rejects it; use a catch-all rule |
-| 4 | Duplicate members | (a) model + (c) gittuf lockout bug | gittuf mode matches; CLI reproducer written; strict mode not fixed (as instructed) |
+| 4 | Duplicate members | (a) model + (c) gittuf lockout bug | gittuf mode matches; CLI reproducer written; both modes reject duplicates since Go change 1 |
 | 5 | Shared keys | (d) our Phase A bug + (c) gittuf quirk | gittuf mode uses key IDs as identities; the Go Phase A refuses shared keys (Go change 1); the prototype's Phase A was never fixed (archived) |
-| 6 | Commit vs RSL signature | agreement | — |
+| 6 | Commit vs RSL signature | agreement | none needed |
 | 7 | Roles vs delegated rule files | different features (roles are expressible in gittuf by expansion) | CAPABILITIES.md; not forced |
 
 ## Not modelled (gittuf is richer than our JSON)
 
-I extended the JSON only as far as the probes needed. In gittuf mode a
+The JSON covers only what the probes needed. In gittuf mode a
 principal's value is its key ID; the `key:<name>` form for shared keys exists
 only in the test harness. Left out, and therefore not covered by the claim
 above:
@@ -369,41 +370,41 @@ above:
   the history, RSL skip annotations and recovery;
 * policy metadata thresholds (root and targets signatures) and expiry.
 
-## Go change 1: each key counts once (after Step 2)
+## Go change 1: each key counts once
 
 Every path where one key could count twice toward a threshold, and how the Go
 code closes it:
 
 | Path | Before | Now | Test |
 |---|---|---|---|
-| Member listed twice in a rule or role (`["a","a"]`) | Python: counted twice | compile error `DuplicateMemberError` (strict and gittuf mode) | `TestDuplicateRuleMemberRejected`, `TestDuplicateRoleMemberRejected` |
-| One signer satisfying two members of one threshold via overlapping roles (2-of-[@r1,@r2], a in both; or 2-of-[a,@r], a in @r) | Python and Go: a alone met it | each chosen member must be met by **disjoint** signers | `TestOverlappingMembersCountOnce`; differential test vs an independent search-based reference (a mutant without the rule gives 2,752 mismatches) |
+| Member listed twice in a rule or role (`["a","a"]`) | Prototype: counted twice | compile error `DuplicateMemberError` (strict and gittuf mode) | `TestDuplicateRuleMemberRejected`, `TestDuplicateRoleMemberRejected` |
+| One signer satisfying two members of one threshold via overlapping roles (2-of-[@r1,@r2], a in both; or 2-of-[a,@r], a in @r) | Prototype and Go: a alone met it | each chosen member must be met by **disjoint** signers | `TestOverlappingMembersCountOnce`; differential test vs an independent search-based reference (a mutant without the rule gives 2,752 mismatches) |
 | Same signer listed twice in Cedar context | already a set | unchanged (Cedar `Set`) | `TestRepeatedSignerInFactsCountsOnce` |
-| Two principal names bound to one public key (one signature filed under both names) | Python Phase A: counted twice (Finding 5) | strict: the Go Phase A verifier refuses the document (hex is normalised, so `AB..` = `ab..`); gittuf mode: key ID is the identity | `TestSharedKeyRejected` (verify_test.go), `TestGittufModeSharedKeyCountsOnce` |
-| Field spec listing a key twice; two field keys with the same public key | Python: counted twice | compile error; field verifier refuses the document | fields_test.go |
+| Two principal names bound to one public key (one signature filed under both names) | Prototype Phase A: counted twice (Finding 5) | strict: the Go Phase A verifier refuses the document (hex is normalised, so `AB..` = `ab..`); gittuf mode: key ID is the identity | `TestSharedKeyRejected` (verify_test.go), `TestGittufModeSharedKeyCountsOnce` |
+| Field spec listing a key twice; two field keys with the same public key | Prototype: counted twice | compile error; field verifier refuses the document | fields_test.go |
 
 The overlapping-roles row changes strict-mode meaning compared with the
-prototype's `compile.py`. While the prototype existed, `TestPythonByteCompat`
-skipped inputs with a duplicate member or an overlap; on its 403 inputs it
-reported 114 identical, 62 rejected by both, 0 different, 227 skipped. That
-test was removed together with the prototype.
+prototype's compiler. While the prototype existed, the byte-compat test
+against it skipped inputs with a duplicate member or an overlap; on its 403
+inputs it reported 114 identical, 62 rejected by both, 0 different, 227
+skipped. That test was removed together with the prototype.
 
-## Notes recorded after the Python-to-Go port
+## Notes on the Go implementation
 
-**(a) The count-once rule changes strict-mode meaning compared with the old `compile.py`.**
-In a threshold, each chosen member must now be met by its own signers. One
-signer can no longer satisfy two members through overlapping roles: 2-of-[@r1, @r2]
-with alice in both roles, or 2-of-[alice, @r] with alice in @r, now need two
-different signers. `compile.py` and `reference.py` let alice satisfy both.
+**(a) The count-once rule changes strict-mode meaning compared with the prototype's compiler.**
+In a threshold, each chosen member must be met by its own signers. One signer
+cannot satisfy two members through overlapping roles: 2-of-[@r1, @r2] with
+alice in both roles, or 2-of-[alice, @r] with alice in @r, need two different
+signers. The prototype's compiler and reference let alice satisfy both.
 With the rule removed from `ExpandThreshold`, the differential test
 (Cedar vs the search-based Go reference, 171,644 verdicts) reports **2,752
 mismatches**, so the rule is exercised. The byte-compat test against the
 prototype (since removed) skipped the affected inputs on purpose (227 of 403).
 
-**(b) The oracle pushes that are no longer compared.** In the 300-document
+**(b) The oracle pushes that are not compared.** In the 300-document
 oracle run, **832 of 2,400 gittuf-mode pushes are not compared**. All of them
 are on documents that list a member twice: gittuf accepts these (and the rule
-can never be met), while the Go compiler now rejects them with
+can never be met), while the Go compiler rejects them with
 `DuplicateMemberError`. Documents with **shared keys are still compared**:
 gittuf mode does not reject them, it merges principals sharing a key into
 one key-ID identity, as gittuf does. The remaining 1,568 gittuf-mode pushes
@@ -422,9 +423,9 @@ Go caller that builds values by hand must pass integers as `int`, `int64` or
 integers exact: `TestFieldsIntegerValueFromJSON` fails if decoding falls back
 to float64, which would encode `1` as `1.0`.
 
-History: the format was chosen to match the prototype's
-`json.dumps(..., sort_keys=True, separators=(",",":"))`. Before the prototype
-was retired, `TestCanonicalMatchesPython` checked 13 values byte for byte,
+History: the format was chosen to match the prototype's JSON encoder with
+sorted keys and no whitespace. Before the prototype was retired, a test
+checked 13 values byte for byte against it,
 including non-ASCII, control characters, DEL, `-0.0`, and floats at the
 fixed/exponent boundaries. Edge cases checked by hand then: `1.50` gives `1.5`
 and `1e2` gives `100.0`, the same in both. `1` gave `1` in both only after the

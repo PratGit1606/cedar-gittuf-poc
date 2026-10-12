@@ -32,7 +32,7 @@ policy sets.
 
 | cvc5 | sha256 of `cvc5-Linux-x86_64-static.zip` | Result |
 |---|---|---|
-| **1.2.1** (requested; the default in `fetch-cvc5.sh`) | `6d44abc233980a14d72cc5809287d27c3335b1d6ee863381d0b5ffcbd0d8de56` | 15/15 queries as expected |
+| **1.2.1** (the default in `fetch-cvc5.sh`) | `6d44abc233980a14d72cc5809287d27c3335b1d6ee863381d0b5ffcbd0d8de56` | 15/15 queries as expected |
 | 1.3.1 (the version the symcc 0.7.0 README names) | `1a1cda20d2df4938fa4944a69f33ddc9172e319ece0eed0aa09c4d7abede3ed1` | 15/15 queries as expected, same outcomes |
 
 Use `CVC5_VERSION=1.3.1 smt/fetch-cvc5.sh` to get the second one.
@@ -51,7 +51,7 @@ permit(principal, action == Action::"write", resource) when { !(resource.name li
 
 The last permit is gittuf's rule that unprotected refs are allowed.
 
-Two **analysis-only** policies are hand-written in `smt/src/main.rs`, because
+Four **analysis-only** policies are hand-written in `smt/src/main.rs`, because
 they are part of the *question*, not of the policies under test:
 * `SCOPE_MAIN`, `forbid … unless { resource.name == "refs/heads/main" }`, is
   added to *both* sides of a query to restrict it to `main`.
@@ -83,10 +83,10 @@ replayed in Cedar: A=Allow B=Deny
 **What this proves.** Restricted to `refs/heads/main`, {narrow} is strictly
 contained in {narrow + broad}: everything the narrow set allows, the broad
 version allows (unsat), and the broad version allows alice alone (the
-counterexample). This is FINDINGS.md Finding 1, now proven for every input
+counterexample). This is FINDINGS.md Finding 1, proven for every input
 instead of observed on samples.
 
-**Correction to the original claim.** Over *all* refs the two sets are
+**Only on `main`.** Over *all* refs the two sets are
 **incomparable**, not nested. In gittuf mode a ref that no rule matches is
 allowed, so the broad rule also *tightens* every other `refs/heads/*` ref:
 `refs/heads/AAAA` goes from "anyone" to "alice must sign". The solver found
@@ -134,7 +134,7 @@ carol authored the change and her own approval made up the 2-of-3.
 
 `p3_except`: `main` needs 1-of-{alice, mallory} **except** mallory, and
 `refs/heads/*` needs 1-of-{mallory}. mallory is deliberately both a member and
-excepted, so only the `except` keeps her out of `main`. The compiled forbid is:
+excepted, so only the `except` keeps mallory out of `main`. The compiled forbid is:
 ```
 forbid(principal, action == Action::"write", resource) when { resource.name like "refs/heads/main" && context.signers.containsAny([User::"mallory"]) };
 ```
@@ -216,7 +216,7 @@ resolution) past `not_after`.
   Proof 3 trusts Phase A to have verified mallory's signature: an
   unverified signature is not in `signers`, so it is neither counted nor
   forbidden.
-* **Strict mode for Proofs 2–4.** gittuf mode rejects `forbid_self_approval`,
+* **Strict mode for Proofs 2 to 4.** gittuf mode rejects `forbid_self_approval`,
   `except`, `window` and `require`: gittuf cannot express them.
 
 ## What the solver handled, and what was not tried
