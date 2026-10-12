@@ -1,1 +1,6 @@
 /.gittuf-oracle
+
+# build and test output
+/go/cmd/gcedar/gcedar
+*.test
+*.out
