@@ -41,6 +41,11 @@ type Rule struct {
 	Threshold int      `json:"threshold"`
 	Members   []string `json:"members"`
 	Source    string   `json:"source,omitempty"`
+
+	// Strict mode only; see features.go.
+	Except  []string        `json:"except,omitempty"`
+	Window  *Window         `json:"window,omitempty"`
+	Require map[string]bool `json:"require,omitempty"`
 }
 
 // Doc is a delegation document.
@@ -50,6 +55,7 @@ type Doc struct {
 	Rules              []Rule            `json:"rules"`
 	Default            string            `json:"default,omitempty"` // "allow" or "deny" (default)
 	ForbidSelfApproval bool              `json:"forbid_self_approval,omitempty"`
+	Forbid             []Forbid          `json:"forbid,omitempty"` // strict mode only; see features.go
 }
 
 func (r Rule) source() string {
@@ -369,6 +375,10 @@ type Compiled struct {
 	NPermit  int
 	NForbid  int
 	Warnings []string // e.g. rules gittuf accepts that can never be met
+
+	// What the host must put in the request (see features.go).
+	UsesNow   bool     // context.now
+	HostFacts []string // boolean context facts, sorted
 }
 
 // Compile translates a delegation document into Cedar policies.
@@ -398,6 +408,10 @@ func Compile(doc *Doc) (*Compiled, error) {
 	if doc.ForbidSelfApproval {
 		emit("forbid", "context.approvals.contains(context.author)", PolicyMeta{Rule: "<self-approval>"})
 	}
+	if err := compileForbids(doc, emit); err != nil {
+		return nil, err
+	}
+	facts := map[string]bool{}
 
 	// negs[j] is "rule j does not match"; strict mode's first-match-wins puts
 	// every earlier rule's negation into each permit.
@@ -423,6 +437,19 @@ func Compile(doc *Doc) (*Compiled, error) {
 		for _, n := range negs {
 			earlier += " && " + n
 		}
+		conds, err := ruleConditions(rule, facts)
+		if err != nil {
+			return nil, err
+		}
+		c.UsesNow = c.UsesNow || rule.Window != nil
+		if rule.Except != nil {
+			users, err := principalList("rule "+rule.Name+": except", rule.Except, doc.Principals)
+			if err != nil {
+				return nil, err
+			}
+			emit("forbid", fmt.Sprintf("%s%s && context.signers.containsAny([%s])", match, earlier, users),
+				PolicyMeta{Rule: rule.Name, Combo: append([]string{}, rule.Except...)})
+		}
 		combos, err := ExpandThreshold(rule.Members, rule.Threshold, doc.Roles, nil)
 		if err != nil {
 			return nil, err
@@ -433,7 +460,7 @@ func Compile(doc *Doc) (*Compiled, error) {
 			if err != nil {
 				return nil, err
 			}
-			body := fmt.Sprintf("%s%s && context.%s.containsAll([%s])", match, earlier, src, users)
+			body := fmt.Sprintf("%s%s && context.%s.containsAll([%s])%s", match, earlier, src, users, conds)
 			emit("permit", body, PolicyMeta{Rule: rule.Name, Combo: append([]string{}, combo...)})
 		}
 		negs = append(negs, "!("+match+")")
@@ -447,6 +474,8 @@ func Compile(doc *Doc) (*Compiled, error) {
 		emit("permit", none, PolicyMeta{Rule: "<default-allow>"})
 	}
 
+	c.HostFacts = sortedKeys(facts)
+	c.Schema = extendSchema(c.UsesNow, c.HostFacts)
 	c.Policies = b.String()
 	if c.Policies == "" {
 		c.Policies = "\n" // an empty policy set is a single newline

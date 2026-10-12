@@ -124,6 +124,9 @@ func compileGittuf(doc *Doc) (*Compiled, error) {
 	if doc.ForbidSelfApproval {
 		return nil, errf("gittuf mode: forbid_self_approval has no gittuf equivalent")
 	}
+	if ext := doc.usesExtensions(); len(ext) > 0 {
+		return nil, errf("gittuf mode: gittuf cannot express forbid rules, exceptions, time windows or host-fact conditions (%s); use strict mode", strings.Join(ext, ", "))
+	}
 	if doc.Default == "deny" {
 		return nil, errf("gittuf mode: unprotected refs are always allowed; use a catch-all \"*\" rule instead of default deny")
 	}

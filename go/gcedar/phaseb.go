@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cedar-policy/cedar-go"
+	"github.com/cedar-policy/cedar-go/types"
 	"github.com/cedar-policy/cedar-go/x/exp/ast"
 	"github.com/cedar-policy/cedar-go/x/exp/schema"
 	"github.com/cedar-policy/cedar-go/x/exp/schema/validate"
@@ -22,6 +24,12 @@ type Facts struct {
 	// MatchedPatterns (gittuf mode only) lists the rule patterns Cedar cannot
 	// match itself that match Ref; see MatchedPatterns.
 	MatchedPatterns []string
+	// Now and Host are host facts for strict-mode windows and require
+	// conditions (Compiled.UsesNow, Compiled.HostFacts). Cedar trusts them: Now
+	// comes from the host clock, not from anything the signer controls. A
+	// missing host fact is false.
+	Now  time.Time
+	Host map[string]bool
 }
 
 // Decision is a Phase B verdict plus the compiled policies that determined it.
@@ -102,8 +110,9 @@ func (e *Evaluator) Entities(ref string) cedar.EntityMap {
 }
 
 // RequestMode builds the Cedar request for a set of facts; the context record
-// matches the mode's schema.
-func RequestMode(mode Mode, f Facts) cedar.Request {
+// matches c's schema.
+func RequestMode(c *Compiled, f Facts) cedar.Request {
+	mode := c.Mode
 	ctx := cedar.RecordMap{
 		"signers":   userSet(f.Signers),
 		"approvals": userSet(f.Approvals),
@@ -115,6 +124,12 @@ func RequestMode(mode Mode, f Facts) cedar.Request {
 			pats[i] = cedar.String(p)
 		}
 		ctx = cedar.RecordMap{"signers": userSet(f.Signers), "matchedPatterns": cedar.NewSet(pats...)}
+	}
+	if c.UsesNow {
+		ctx["now"] = types.NewDatetime(f.Now)
+	}
+	for _, name := range c.HostFacts {
+		ctx[cedar.String(name)] = cedar.Boolean(f.Host[name])
 	}
 	return cedar.Request{
 		Principal: cedar.NewEntityUID("User", cedar.String(f.Pusher)),
@@ -131,7 +146,10 @@ func (e *Evaluator) Decide(f Facts) Decision {
 
 // DecideWith is Decide with a caller-supplied entity store (for batching).
 func (e *Evaluator) DecideWith(ents cedar.EntityMap, f Facts) Decision {
-	dec, diag := cedar.Authorize(e.ps, ents, RequestMode(e.Compiled.Mode, f))
+	if e.Compiled.UsesNow && f.Now.IsZero() {
+		return Decision{Errors: []string{"policy needs context.now but the host supplied no time"}} // fail closed
+	}
+	dec, diag := cedar.Authorize(e.ps, ents, RequestMode(e.Compiled, f))
 	d := Decision{Allowed: dec == cedar.Allow}
 	for _, r := range diag.Reasons {
 		d.Reasons = append(d.Reasons, e.meta(r.PolicyID))

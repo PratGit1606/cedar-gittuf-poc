@@ -35,9 +35,9 @@ func main() {
 	}
 	b, err := os.ReadFile(fs.Arg(0))
 	check(err)
-	var doc gcedar.Doc
-	check(json.Unmarshal(b, &doc))
-	c, err := gcedar.CompileMode(&doc, gcedar.Mode(*mode))
+	doc, err := gcedar.ParseDoc(b)
+	check(err)
+	c, err := gcedar.CompileMode(doc, gcedar.Mode(*mode))
 	check(err)
 	if *out == "" {
 		fmt.Print(c.Policies)

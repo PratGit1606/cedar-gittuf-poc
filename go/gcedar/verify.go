@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Two-phase verifier, strict mode.
@@ -109,6 +110,11 @@ type Verdict struct {
 type Verifier struct {
 	Doc  *Doc
 	Eval *Evaluator
+
+	// Host facts for windows and require conditions (trusted). Clock defaults
+	// to time.Now; HostFacts may be nil (every fact false).
+	Clock     func() time.Time
+	HostFacts func(*Change) map[string]bool
 }
 
 // NewVerifier compiles doc and refuses documents where two principals are
@@ -144,7 +150,9 @@ func checkSharedKeys(keys map[string]string, noun string) error {
 }
 
 // Candidates is the lazy-verification prefilter: only principals named
-// (directly or through roles) by rules whose pattern matches ref.
+// (directly or through roles) by rules whose pattern matches ref, plus the
+// principals of matching excepts and forbids (a forbid can only fire on a
+// signature that was verified).
 func (v *Verifier) Candidates(ref string) []string {
 	out := map[string]bool{}
 	var walk func(m string, seen map[string]bool)
@@ -166,6 +174,16 @@ func (v *Verifier) Candidates(ref string) []string {
 		if GlobMatch(r.Pattern, ref) {
 			for _, m := range r.Members {
 				walk(m, map[string]bool{})
+			}
+			for _, m := range r.Except {
+				out[m] = true
+			}
+		}
+	}
+	for _, f := range v.Doc.Forbid {
+		if GlobMatch(f.Pattern, ref) {
+			for _, m := range f.Principals {
+				out[m] = true
 			}
 		}
 	}
@@ -191,7 +209,17 @@ func (v *Verifier) PhaseA(ch *Change) (signers, approvals []string, checks int) 
 // Check runs Phase A then Phase B.
 func (v *Verifier) Check(ch *Change) Verdict {
 	signers, approvals, checks := v.PhaseA(ch)
-	d := v.Eval.Decide(Facts{Ref: ch.Ref, Pusher: ch.Pusher, Author: ch.Author, Signers: signers, Approvals: approvals})
+	f := Facts{Ref: ch.Ref, Pusher: ch.Pusher, Author: ch.Author, Signers: signers, Approvals: approvals}
+	if v.Eval.Compiled.UsesNow {
+		f.Now = time.Now()
+		if v.Clock != nil {
+			f.Now = v.Clock()
+		}
+	}
+	if v.HostFacts != nil {
+		f.Host = v.HostFacts(ch)
+	}
+	d := v.Eval.Decide(f)
 	return Verdict{Decision: d, Signers: signers, Approvals: approvals, SigChecks: checks}
 }
 
