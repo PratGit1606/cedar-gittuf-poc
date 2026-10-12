@@ -1,7 +1,6 @@
 package gcedar
 
 import (
-	"fmt"
 	"math/rand"
 	"sort"
 	"strings"
@@ -9,91 +8,12 @@ import (
 	"time"
 
 	"github.com/cedar-policy/cedar-go"
-	"github.com/cedar-policy/cedar-go/types"
 )
 
 // One test per row of CAPABILITIES.md (rows that reuse an existing test say
-// so in the matrix). Rows the JSON compiler does not emit use hand-written
-// Cedar; every policy set is validated against its schema with cedar-go's
-// validator before evaluation.
-
-// capSchema extends the gittuf-mode schema with the extra Phase A facts the
-// capability rows need. Each extra field is a host-computed fact.
-const capSchema = `entity User;
-entity Ref { name: String, kind: String };
-action write appliesTo {
-  principal: User,
-  resource: Ref,
-  context: {
-    signers: Set<User>,
-    matchedPatterns: Set<String>,
-    approvals: Set<User>,
-    author: User,
-    now: datetime,
-    refExists: Bool,
-    fastForward: Bool,
-    ciPassed: Bool
-  }
-};
-`
-
-type capReq struct {
-	ref         string
-	kind        string
-	signers     []string
-	approvals   []string
-	author      string
-	now         time.Time
-	refExists   bool
-	fastForward bool
-	ciPassed    bool
-}
-
-func capEval(t *testing.T, policies string, r capReq) (bool, []string) {
-	t.Helper()
-	ps, err := cedar.NewPolicySetFromBytes("cap.cedar", []byte(policies))
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if err := ValidatePoliciesWith(capSchema, ps); err != nil {
-		t.Fatalf("validation: %v", err)
-	}
-	if r.kind == "" {
-		r.kind = "branch"
-	}
-	if r.author == "" {
-		r.author = "nobody"
-	}
-	if r.now.IsZero() {
-		r.now = time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
-	}
-	rid := cedar.NewEntityUID("Ref", cedar.String(r.ref))
-	ents := cedar.EntityMap{rid: {UID: rid, Attributes: cedar.NewRecord(cedar.RecordMap{
-		"name": cedar.String(r.ref), "kind": cedar.String(r.kind)})}}
-	d, diag := cedar.Authorize(ps, ents, cedar.Request{
-		Principal: cedar.NewEntityUID("User", "pusher"),
-		Action:    cedar.NewEntityUID("Action", "write"),
-		Resource:  rid,
-		Context: cedar.NewRecord(cedar.RecordMap{
-			"signers":         userSet(r.signers),
-			"matchedPatterns": cedar.NewSet(),
-			"approvals":       userSet(r.approvals),
-			"author":          cedar.NewEntityUID("User", cedar.String(r.author)),
-			"now":             types.NewDatetime(r.now),
-			"refExists":       cedar.Boolean(r.refExists),
-			"fastForward":     cedar.Boolean(r.fastForward),
-			"ciPassed":        cedar.Boolean(r.ciPassed),
-		}),
-	})
-	if len(diag.Errors) > 0 {
-		t.Fatalf("evaluation errors: %v", diag.Errors)
-	}
-	var fired []string
-	for _, x := range diag.Reasons {
-		fired = append(fired, string(x.PolicyID))
-	}
-	return d == cedar.Allow, fired
-}
+// so in the matrix). Every row evaluates compiler output, which NewEvaluator
+// validates against its schema with cedar-go's validator; only the
+// schema-validation row feeds the validator deliberately broken policies.
 
 func gittufCompiled(t *testing.T, doc *Doc) *Compiled {
 	t.Helper()
@@ -172,37 +92,54 @@ func TestCapThreshold(t *testing.T) {
 	}
 }
 
-// Row: forbid overrides permits. Compiled gittuf-mode rule (main: 1-of-{alice})
-// plus a hand-written forbid acting like a gittuf global threshold rule:
-// "any refs/heads/* update needs 2 distinct signers among all principals".
+// strictEval compiles doc in strict mode and returns its evaluator.
+func strictEval(t *testing.T, doc *Doc) *Evaluator {
+	t.Helper()
+	c, err := Compile(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, err := NewEvaluator(doc, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ev
+}
+
+// Row: forbid overrides permits (compiler output, strict mode). mallory is a
+// member of main's rule, but a top-level forbid on refs/heads/* wins over the
+// permit, and the decision names the forbid.
 func TestCapForbidOverridesPermit(t *testing.T) {
-	doc := &Doc{Principals: keyed("alice", "bob", "carol"),
-		Rules: []Rule{{Name: "main", Pattern: "refs/heads/main", Threshold: 1, Members: []string{"alice"}}}}
-	compiled := gittufCompiled(t, doc)
-	forbidID := fmt.Sprintf("policy%d", len(compiled.Meta)) // positional IDs; the forbid comes last
-	pol := compiled.Policies + `@id("global-2")
-forbid(principal, action == Action::"write", resource) when { resource.name like "refs/heads/*" } unless {
-  context.signers.containsAll([User::"alice", User::"bob"]) || context.signers.containsAll([User::"alice", User::"carol"]) ||
-  context.signers.containsAll([User::"bob", User::"carol"]) };
-`
-	if ok, fired := capEval(t, pol, capReq{ref: "refs/heads/main", signers: []string{"alice"}}); ok || len(fired) != 1 || fired[0] != forbidID {
-		t.Errorf("alice alone: allowed=%v fired=%v; want deny by the forbid", ok, fired)
+	doc := &Doc{Principals: keyed("alice", "mallory"),
+		Rules:  []Rule{{Name: "main", Pattern: "refs/heads/main", Threshold: 1, Members: []string{"alice", "mallory"}}},
+		Forbid: []Forbid{{Name: "no-mallory", Pattern: "refs/heads/*", Principals: []string{"mallory"}}}}
+	ev := strictEval(t, doc)
+	d := ev.Decide(Facts{Ref: "refs/heads/main", Signers: []string{"mallory"}})
+	if d.Allowed || len(d.Reasons) != 1 || d.Reasons[0].Kind != "forbid" || d.Reasons[0].Rule != "no-mallory" {
+		t.Errorf("mallory alone: %+v; want deny by forbid no-mallory", d)
 	}
-	if ok, _ := capEval(t, pol, capReq{ref: "refs/heads/main", signers: []string{"alice", "bob"}}); !ok {
-		t.Error("alice+bob should pass both the rule and the floor")
+	if d := ev.Decide(Facts{Ref: "refs/heads/main", Signers: []string{"alice", "mallory"}}); d.Allowed {
+		t.Error("alice+mallory: the forbid must win over alice's permit")
 	}
-	if ok, _ := capEval(t, pol, capReq{ref: "refs/heads/other", signers: nil}); ok {
-		t.Error("unprotected ref under the floor should be denied")
+	if d := ev.Decide(Facts{Ref: "refs/heads/main", Signers: []string{"alice"}}); !d.Allowed {
+		t.Error("alice alone should be allowed")
+	}
+	// Control: without the forbid, mallory's permit allows.
+	doc.Forbid = nil
+	if d := strictEval(t, doc).Decide(Facts{Ref: "refs/heads/main", Signers: []string{"mallory"}}); !d.Allowed {
+		t.Error("control: without the forbid mallory should be allowed")
 	}
 }
 
-// Row: rule exceptions ("everything under refs/heads/* except main").
+// Row: rule exceptions (compiler output, strict mode). Ref exception: "all of
+// refs/heads/* except main" comes from first-match order (main's rule is
+// listed first, so the broad rule's permits carry !(main)). Principal
+// exception: "except" on the broad rule, scoped to the refs that rule decides.
 func TestCapRuleExceptions(t *testing.T) {
-	pol := `permit(principal, action == Action::"write", resource) when {
-  resource.name like "refs/heads/*" && !(resource.name == "refs/heads/main") && context.signers.contains(User::"alice") };
-permit(principal, action == Action::"write", resource) when {
-  resource.name == "refs/heads/main" && context.signers.containsAll([User::"bob", User::"carol"]) };
-`
+	doc := &Doc{Principals: keyed("alice", "bob", "carol", "mallory"), Rules: []Rule{
+		{Name: "main", Pattern: "refs/heads/main", Threshold: 2, Members: []string{"bob", "carol"}},
+		{Name: "heads", Pattern: "refs/heads/*", Threshold: 1, Members: []string{"alice", "mallory"}, Except: []string{"mallory"}}}}
+	ev := strictEval(t, doc)
 	cases := []struct {
 		ref     string
 		signers []string
@@ -211,63 +148,67 @@ permit(principal, action == Action::"write", resource) when {
 		{"refs/heads/feature", []string{"alice"}, true},
 		{"refs/heads/main", []string{"alice"}, false}, // the case gittuf allows (FINDINGS Finding 1)
 		{"refs/heads/main", []string{"bob", "carol"}, true},
+		{"refs/heads/feature", []string{"alice", "mallory"}, false}, // excepted principal signed
+		{"refs/heads/feature", []string{"mallory"}, false},
+		{"refs/heads/main", []string{"bob", "carol", "mallory"}, true}, // heads' except does not reach main
 	}
 	for _, c := range cases {
-		if ok, _ := capEval(t, pol, capReq{ref: c.ref, signers: c.signers}); ok != c.want {
-			t.Errorf("%s %v: got %v want %v", c.ref, c.signers, ok, c.want)
+		if got := ev.Decide(Facts{Ref: c.ref, Signers: c.signers}).Allowed; got != c.want {
+			t.Errorf("%s %v: got %v want %v", c.ref, c.signers, got, c.want)
 		}
+	}
+	if d := ev.Decide(Facts{Ref: "refs/heads/feature", Signers: []string{"alice", "mallory"}}); len(d.Reasons) != 1 || d.Reasons[0].Rule != "heads" || d.Reasons[0].Kind != "forbid" {
+		t.Errorf("reasons should name heads' except: %+v", d.Reasons)
 	}
 }
 
-// Row: time windows (cedar-go datetime). Freeze between two instants, and
-// only during 09:00-17:00 UTC otherwise.
+// Row: time windows (compiler output, strict mode): main may only change
+// from 2026-01-05 until the start of a freeze, inclusive. now is a host fact.
 func TestCapTimeWindow(t *testing.T) {
-	pol := `permit(principal, action == Action::"write", resource) when {
-  resource.name == "refs/heads/main" && context.signers.contains(User::"alice") &&
-  context.now.toTime() >= duration("9h") && context.now.toTime() < duration("17h") };
-@id("freeze")
-forbid(principal, action == Action::"write", resource) when {
-  resource.name == "refs/heads/main" &&
-  context.now >= datetime("2026-12-20T00:00:00Z") && context.now < datetime("2027-01-05T00:00:00Z") };
-`
-	at := func(s string) time.Time { tm, _ := time.Parse(time.RFC3339, s); return tm }
+	doc := &Doc{Principals: keyed("alice"), Rules: []Rule{{Name: "main", Pattern: "refs/heads/main", Threshold: 1,
+		Members: []string{"alice"}, Window: &Window{NotBefore: "2026-01-05T00:00:00Z", NotAfter: "2026-12-19T23:59:59Z"}}}}
+	ev := strictEval(t, doc)
 	for when, want := range map[string]bool{
-		"2026-10-07T12:00:00Z": true,  // business hours
-		"2026-10-07T20:00:00Z": false, // after hours
-		"2026-12-22T12:00:00Z": false, // freeze window, business hours
-		"2027-01-05T09:00:00Z": true,  // freeze over
+		"2026-01-04T23:59:59Z":     false, // before
+		"2026-01-05T00:00:00Z":     true,  // not_before is inclusive
+		"2026-10-07T12:00:00Z":     true,
+		"2026-12-19T23:59:59Z":     true,  // not_after is inclusive
+		"2026-12-20T00:00:00.001Z": false, // freeze
 	} {
-		if ok, _ := capEval(t, pol, capReq{ref: "refs/heads/main", signers: []string{"alice"}, now: at(when)}); ok != want {
-			t.Errorf("%s: got %v want %v", when, ok, want)
+		now, _ := time.Parse(time.RFC3339Nano, when)
+		if got := ev.Decide(Facts{Ref: "refs/heads/main", Signers: []string{"alice"}, Now: now}).Allowed; got != want {
+			t.Errorf("%s: got %v want %v", when, got, want)
 		}
+	}
+	if d := ev.Decide(Facts{Ref: "refs/heads/main", Signers: []string{"alice"}}); d.Allowed || len(d.Errors) == 0 {
+		t.Errorf("no clock: %+v; want deny with an error", d)
 	}
 }
 
-// Row: attribute-based conditions on the ref and context: immutable tags,
-// no non-fast-forward on main, CI must pass on main.
+// Row: attribute-based conditions (compiler output, strict mode): immutable
+// tags (host fact new_ref), and main needs a fast-forward with CI passed.
 func TestCapAttributeConditions(t *testing.T) {
-	pol := `permit(principal, action == Action::"write", resource) when { context.signers.contains(User::"alice") };
-@id("immutable-tags")
-forbid(principal, action == Action::"write", resource) when { resource.kind == "tag" && context.refExists };
-@id("no-force-push-main")
-forbid(principal, action == Action::"write", resource) when { resource.name == "refs/heads/main" && context.refExists && !context.fastForward };
-@id("ci-on-main")
-forbid(principal, action == Action::"write", resource) when { resource.name == "refs/heads/main" && !context.ciPassed };
-`
+	doc := &Doc{Principals: keyed("alice"), Rules: []Rule{
+		{Name: "tags", Pattern: "refs/tags/*", Threshold: 1, Members: []string{"alice"}, Require: map[string]bool{"new_ref": true}},
+		{Name: "main", Pattern: "refs/heads/main", Threshold: 1, Members: []string{"alice"},
+			Require: map[string]bool{"fast_forward": true, "ci_passed": true}}}}
+	ev := strictEval(t, doc)
+	facts := func(names ...string) map[string]bool { return toSet(names) }
 	cases := []struct {
 		name string
-		r    capReq
+		f    Facts
 		want bool
 	}{
-		{"new tag", capReq{ref: "refs/tags/v1", kind: "tag", signers: []string{"alice"}}, true},
-		{"move existing tag", capReq{ref: "refs/tags/v1", kind: "tag", signers: []string{"alice"}, refExists: true}, false},
-		{"main ff + CI", capReq{ref: "refs/heads/main", signers: []string{"alice"}, refExists: true, fastForward: true, ciPassed: true}, true},
-		{"main force push", capReq{ref: "refs/heads/main", signers: []string{"alice"}, refExists: true, ciPassed: true}, false},
-		{"main CI failed", capReq{ref: "refs/heads/main", signers: []string{"alice"}, refExists: true, fastForward: true}, false},
+		{"new tag", Facts{Ref: "refs/tags/v1", Host: facts("new_ref")}, true},
+		{"move existing tag", Facts{Ref: "refs/tags/v1"}, false},
+		{"main ff + CI", Facts{Ref: "refs/heads/main", Host: facts("fast_forward", "ci_passed")}, true},
+		{"main force push", Facts{Ref: "refs/heads/main", Host: facts("ci_passed")}, false},
+		{"main CI failed", Facts{Ref: "refs/heads/main", Host: facts("fast_forward")}, false},
 	}
 	for _, c := range cases {
-		if ok, _ := capEval(t, pol, c.r); ok != c.want {
-			t.Errorf("%s: got %v want %v", c.name, ok, c.want)
+		c.f.Signers = []string{"alice"}
+		if got := ev.Decide(c.f).Allowed; got != c.want {
+			t.Errorf("%s: got %v want %v", c.name, got, c.want)
 		}
 	}
 }
@@ -310,7 +251,7 @@ func TestCapSchemaValidation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parse: %v", err)
 		}
-		if err := ValidatePoliciesWith(capSchema, ps); err == nil {
+		if err := ValidatePoliciesWith(Schema, ps); err == nil {
 			t.Errorf("validator accepted: %s", bad)
 		}
 	}
